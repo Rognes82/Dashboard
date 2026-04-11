@@ -2,6 +2,7 @@ import { StatCard } from "@/components/StatCard";
 import { ClientPipeline } from "@/components/ClientPipeline";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { listClients } from "@/lib/queries/clients";
+import { listProjects } from "@/lib/queries/projects";
 import { listAgents } from "@/lib/queries/agents";
 import { listRecentActivity } from "@/lib/queries/activity";
 import { listFiles } from "@/lib/queries/files";
@@ -10,11 +11,13 @@ export const dynamic = "force-dynamic";
 
 export default function DashboardPage() {
   const clients = listClients();
+  const projects = listProjects();
   const agents = listAgents();
   const activity = listRecentActivity(10);
   const files = listFiles(1000);
 
   const activeClients = clients.filter((c) => c.status === "active").length;
+  const assignedProjects = projects.filter((p) => p.client_id).length;
   const runningAgents = agents.filter((a) => a.status === "running").length;
   const cronJobs = agents.filter((a) => a.type === "cron").length;
 
@@ -27,8 +30,9 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-3 mb-3">
+      <div className="grid grid-cols-5 gap-3 mb-3">
         <StatCard label="Clients" value={clients.length} subtext={`${activeClients} active`} subtextColor="green" />
+        <StatCard label="Projects" value={projects.length} subtext={`${assignedProjects} assigned`} subtextColor="green" />
         <StatCard label="Agents" value={runningAgents} subtext="running" />
         <StatCard label="Cron Jobs" value={cronJobs} subtext="scheduled" />
         <StatCard label="Files" value={files.length} subtext="indexed" />

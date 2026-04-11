@@ -6,5 +6,7 @@ data/*.db
 data/*.db-journal
 data/*.db-shm
 data/*.db-wal
+.playwright-mcp/
+*.png
 next-env.d.ts
 *.log

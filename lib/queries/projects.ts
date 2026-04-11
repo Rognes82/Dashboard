@@ -55,3 +55,15 @@ export function listProjectsByClient(clientId: string): Project[] {
     .prepare("SELECT * FROM projects WHERE client_id = ? ORDER BY last_commit_at DESC NULLS LAST")
     .all(clientId) as Project[];
 }
+
+export function getProjectById(id: string): Project | null {
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as Project | undefined;
+  return row ?? null;
+}
+
+export function setProjectClient(id: string, clientId: string | null): Project | null {
+  const db = getDb();
+  db.prepare("UPDATE projects SET client_id = ? WHERE id = ?").run(clientId, id);
+  return getProjectById(id);
+}

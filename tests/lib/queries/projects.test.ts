@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { resetDbForTesting, closeDb } from "../../../lib/db";
 import { createClient } from "../../../lib/queries/clients";
-import { upsertProject, listProjects, listProjectsByClient } from "../../../lib/queries/projects";
+import { upsertProject, listProjects, listProjectsByClient, setProjectClient, getProjectById } from "../../../lib/queries/projects";
 import fs from "fs";
 import path from "path";
 
@@ -49,5 +49,23 @@ describe("project queries", () => {
     upsertProject({ client_id: b.id, name: "B1", path: "/b1", branch: "main" });
     expect(listProjectsByClient(a.id)).toHaveLength(1);
     expect(listProjectsByClient(a.id)[0].name).toBe("A1");
+  });
+
+  it("setProjectClient assigns an unassigned project", () => {
+    const client = createClient({ name: "Akoola" });
+    const project = upsertProject({ client_id: null, name: "Orphan", path: "/o", branch: "main" });
+    const updated = setProjectClient(project.id, client.id);
+    expect(updated?.client_id).toBe(client.id);
+  });
+
+  it("setProjectClient unassigns by passing null", () => {
+    const client = createClient({ name: "Akoola" });
+    const project = upsertProject({ client_id: client.id, name: "P", path: "/p", branch: "main" });
+    const updated = setProjectClient(project.id, null);
+    expect(updated?.client_id).toBeNull();
+  });
+
+  it("getProjectById returns null for missing", () => {
+    expect(getProjectById("nonexistent")).toBeNull();
   });
 });

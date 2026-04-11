@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, Users, Cpu, FileText, StickyNote, Settings, type LucideIcon } from "lucide-react";
+import { LayoutGrid, Users, FolderGit2, Cpu, FileText, StickyNote, Settings, type LucideIcon } from "lucide-react";
 
 interface NavItem {
   href: string;
@@ -13,6 +13,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutGrid },
   { href: "/clients", label: "Clients", icon: Users },
+  { href: "/projects", label: "Projects", icon: FolderGit2 },
   { href: "/agents", label: "Agents", icon: Cpu },
   { href: "/files", label: "Files", icon: FileText },
   { href: "/notes", label: "Notes", icon: StickyNote },
