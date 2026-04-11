@@ -1,1 +1,8 @@
 .superpowers/
+node_modules/
+.next/
+out/
+data/*.db
+data/*.db-journal
+next-env.d.ts
+*.log
