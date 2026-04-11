@@ -29,7 +29,7 @@ function readGitInfo(repoPath: string): GitInfo {
   }
 }
 
-export function scanDirectoryForProjects(rootPath: string, depth = 2): void {
+export function scanDirectoryForProjects(rootPath: string, depth = 4): void {
   if (!fs.existsSync(rootPath)) return;
 
   function walk(dir: string, remainingDepth: number): void {
