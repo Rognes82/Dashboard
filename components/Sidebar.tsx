@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, Users, Cpu, FileText, StickyNote, Settings } from "lucide-react";
+import { LayoutGrid, Users, Cpu, FileText, StickyNote, Settings, type LucideIcon } from "lucide-react";
 
 interface NavItem {
   href: string;
   label: string;
-  icon: React.ComponentType<{ size?: number }>;
+  icon: LucideIcon;
 }
 
 const navItems: NavItem[] = [
