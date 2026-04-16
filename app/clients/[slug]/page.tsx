@@ -3,7 +3,7 @@ import { Card, CardHeader } from "@/components/Card";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Badge } from "@/components/Badge";
 import { StatusDot } from "@/components/StatusDot";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime, activityBorderColor } from "@/lib/utils";
 import { getClientBySlug } from "@/lib/queries/clients";
 import { listProjectsByClient } from "@/lib/queries/projects";
 import { listFilesByClient } from "@/lib/queries/files";
@@ -51,7 +51,7 @@ export default function ClientHubPage({ params }: { params: { slug: string } }) 
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {/* Projects */}
         <Card>
           <CardHeader label="Projects" right={<span className="text-2xs text-text-muted">{projects.length} total</span>} />
@@ -130,7 +130,7 @@ export default function ClientHubPage({ params }: { params: { slug: string } }) 
           ) : (
             <div className="flex flex-col gap-2.5">
               {activity.map((a) => (
-                <div key={a.id} className="border-l-2 border-accent-green pl-2.5">
+                <div key={a.id} className={`border-l-2 pl-2.5 ${activityBorderColor(a.source)}`}>
                   <div className="text-xs text-text-primary">{a.title}</div>
                   <div className="mono text-[10px] text-text-muted">
                     {formatRelativeTime(a.timestamp)} · {a.source}

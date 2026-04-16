@@ -73,6 +73,52 @@ Place JSON files at `~/.dashboard/agents/`:
    http://<mac-mini-tailscale-name>:3000
    ```
 
+## Running as a launchd service (recommended)
+
+Rather than leaving `npm start` in a terminal, register a launchd agent so the dashboard starts on login and restarts on crash. Save as `~/Library/LaunchAgents/com.local.dashboard.plist` (adjust paths/user):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>            <string>com.local.dashboard</string>
+  <key>WorkingDirectory</key> <string>/Users/YOU/Dashboard</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/npm</string>
+    <string>start</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOSTNAME</key> <string>0.0.0.0</string>
+    <key>PORT</key>     <string>3000</string>
+    <key>PATH</key>     <string>/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>      <true/>
+  <key>KeepAlive</key>      <true/>
+  <key>StandardOutPath</key><string>/tmp/dashboard.out.log</string>
+  <key>StandardErrorPath</key><string>/tmp/dashboard.err.log</string>
+</dict>
+</plist>
+```
+
+Load it: `launchctl load ~/Library/LaunchAgents/com.local.dashboard.plist`.
+
+## Backups
+
+The SQLite database lives at `data/dashboard.db`. Add a daily backup cron entry:
+
+```
+0 3 * * * cp ~/Dashboard/data/dashboard.db ~/Dashboard/data/backups/dashboard-$(date +\%Y\%m\%d).db
+```
+
+Keep `data/backups/` gitignored and prune with a retention policy of your choice.
+
+## Security
+
+There is **no authentication** on the app or API routes. This is acceptable only because the intended deploy binds to the Tailscale LAN. **Do not** expose port 3000 to the public internet. If that ever changes, add an auth proxy (Cloudflare Access, Tailscale Serve with ACLs, or a simple shared-secret middleware) in front of Next.js.
+
 ## Architecture
 
 - **Data Layer**: SQLite (`data/dashboard.db`), populated by independent sync scripts

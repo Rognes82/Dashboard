@@ -10,3 +10,4 @@ data/*.db-wal
 *.png
 next-env.d.ts
 *.log
+tsconfig.tsbuildinfo

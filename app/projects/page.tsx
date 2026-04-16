@@ -53,8 +53,8 @@ export default function ProjectsPage() {
                 >
                   <StatusDot status={isRecent ? "green" : "gray"} size={7} />
                   <div className="min-w-0">
-                    <div className="text-xs text-text-primary font-medium truncate">{p.name}</div>
-                    <div className="mono text-[10px] text-text-muted truncate">{p.path}</div>
+                    <div className="text-xs text-text-primary font-medium truncate" title={p.name}>{p.name}</div>
+                    <div className="mono text-[10px] text-text-muted truncate" title={p.path}>{p.path}</div>
                   </div>
                   <div className="mono text-[10px] text-text-secondary">{p.branch ?? "—"}</div>
                   <div className="text-[10px] text-text-secondary">
