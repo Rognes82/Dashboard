@@ -20,7 +20,16 @@ export function AddClientForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, pipeline_stage: pipelineStage || undefined }),
       });
-      if (!res.ok) throw new Error((await res.json()).error ?? "failed to create");
+      if (!res.ok) {
+        let message = `failed to create (${res.status})`;
+        try {
+          const data = await res.json();
+          if (data?.error && typeof data.error === "string") message = data.error;
+        } catch {
+          // non-JSON response, keep default message
+        }
+        throw new Error(message);
+      }
       setName("");
       setPipelineStage("");
       router.refresh();

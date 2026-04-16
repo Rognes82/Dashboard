@@ -1,5 +1,18 @@
 import { ulid } from "ulid";
 
+export const ACTIVITY_BORDER_COLORS: Record<string, string> = {
+  git: "border-accent-green",
+  notion: "border-accent-green",
+  gdrive: "border-accent-green",
+  discord: "border-accent-green",
+  files: "border-accent-green",
+  system: "border-accent-amber",
+};
+
+export function activityBorderColor(source: string): string {
+  return ACTIVITY_BORDER_COLORS[source] ?? "border-accent-green";
+}
+
 export function newId(): string {
   return ulid();
 }
@@ -17,8 +30,12 @@ export function slugify(input: string): string {
     .replace(/-+/g, "-");
 }
 
-export function formatRelativeTime(isoString: string): string {
-  const diffMs = Date.now() - new Date(isoString).getTime();
+export function formatRelativeTime(isoString: string | null | undefined): string {
+  if (!isoString) return "unknown";
+  const parsed = new Date(isoString).getTime();
+  if (!Number.isFinite(parsed)) return "unknown";
+  const diffMs = Date.now() - parsed;
+  if (diffMs < 0) return "just now";
   const diffSec = Math.floor(diffMs / 1000);
   if (diffSec < 60) return "just now";
   const diffMin = Math.floor(diffSec / 60);

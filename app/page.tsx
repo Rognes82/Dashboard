@@ -30,7 +30,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-5 gap-3 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
         <StatCard label="Clients" value={clients.length} subtext={`${activeClients} active`} subtextColor="green" />
         <StatCard label="Projects" value={projects.length} subtext={`${assignedProjects} assigned`} subtextColor="green" />
         <StatCard label="Agents" value={runningAgents} subtext="running" />
@@ -38,7 +38,7 @@ export default function DashboardPage() {
         <StatCard label="Files" value={files.length} subtext="indexed" />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <ClientPipeline clients={clients} />
         <ActivityFeed items={activity} />
       </div>

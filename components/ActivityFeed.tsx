@@ -1,15 +1,6 @@
 import { Card, CardHeader } from "./Card";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime, activityBorderColor } from "@/lib/utils";
 import type { ActivityEntry } from "@/lib/types";
-
-const borderColors: Record<string, string> = {
-  git: "border-accent-green",
-  notion: "border-accent-green",
-  gdrive: "border-accent-green",
-  discord: "border-accent-green",
-  files: "border-accent-green",
-  system: "border-accent-amber",
-};
 
 export function ActivityFeed({ items }: { items: ActivityEntry[] }) {
   return (
@@ -20,7 +11,7 @@ export function ActivityFeed({ items }: { items: ActivityEntry[] }) {
       ) : (
         <div className="flex flex-col gap-2.5">
           {items.map((a) => (
-            <div key={a.id} className={`border-l-2 pl-2.5 ${borderColors[a.source] ?? "border-accent-green"}`}>
+            <div key={a.id} className={`border-l-2 pl-2.5 ${activityBorderColor(a.source)}`}>
               <div className="text-xs text-text-primary">{a.title}</div>
               <div className="mono text-[10px] text-text-muted">
                 {formatRelativeTime(a.timestamp)} · {a.source}
