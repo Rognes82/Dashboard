@@ -115,14 +115,18 @@ CREATE TABLE vault_notes (
     created_at TEXT NOT NULL,
     modified_at TEXT NOT NULL,        -- filesystem mtime
     last_indexed_at TEXT NOT NULL,
+    deleted_at TEXT,                  -- soft-delete timestamp; hard-deleted on next scan if still missing
     client_id TEXT REFERENCES clients(id) ON DELETE SET NULL,
     project_id TEXT REFERENCES projects(id) ON DELETE SET NULL
 );
 
 -- FTS5 virtual table for cross-source search.
--- CONTENTLESS — the indexer explicitly writes rows here with the same rowid
--- as vault_notes. This avoids the need for external-content triggers and
--- matches the reality that note content lives in vault files, not the DB.
+-- STANDALONE — not tied to vault_notes via external content. The indexer
+-- explicitly INSERTs/UPDATEs/DELETEs rows here using the same rowid as
+-- the corresponding vault_notes row. snippet() works because the table
+-- stores its own copy of title/content/tags. This matches the reality
+-- that note content lives in vault files, not the DB, but still allows
+-- rich search output.
 CREATE VIRTUAL TABLE vault_notes_fts USING fts5(
     title, content, tags,
     tokenize = 'porter unicode61 remove_diacritics 1'
@@ -160,6 +164,7 @@ CREATE INDEX idx_vault_notes_modified ON vault_notes(modified_at);
 CREATE INDEX idx_vault_notes_client ON vault_notes(client_id);
 CREATE INDEX idx_vault_notes_project ON vault_notes(project_id);
 CREATE UNIQUE INDEX idx_vault_notes_source_id ON vault_notes(source_id) WHERE source_id IS NOT NULL;
+CREATE INDEX idx_vault_notes_deleted ON vault_notes(deleted_at) WHERE deleted_at IS NOT NULL;
 CREATE INDEX idx_bins_parent ON bins(parent_bin_id);
 CREATE INDEX idx_note_bins_note ON note_bins(note_id);
 CREATE INDEX idx_note_bins_bin ON note_bins(bin_id);
@@ -219,6 +224,7 @@ Three scripts, each with one responsibility. All follow the existing `upsertX + 
   - Else: upsert `vault_notes` by `vault_path`, refresh `vault_notes_fts` row (DELETE + INSERT with same rowid), upsert `note_tags` from frontmatter `tags` + inline `#hashtags`.
   - On **first index of a file** (no existing `vault_notes` row): if frontmatter contains `bins: [...]`, create `note_bins` rows with `assigned_by='auto'`. On subsequent re-indexes, **do not touch** `note_bins` — see §7.3.
 - Detects deletions: any `vault_notes.vault_path` not seen in the scan gets soft-deleted (`deleted_at` timestamp); hard-delete on the next scan if still missing.
+- **Overlap protection:** cron entry wraps invocation in `flock -n /tmp/vault-indexer.lock` so a slow scan (e.g., initial seed over 5k files) doesn't collide with the next tick. If lock is held, the new tick exits immediately — safe because the next tick will just pick up where things are.
 - Written as an idempotent one-shot script. Invoked by cron every 5 min (logs to `~/Library/Logs/vault-indexer.log`) and also directly by the capture flow (see §6) for immediate-index on new captures.
 - Records run in `sync_status(sync_name='vault-indexer', duration_ms, status, cursor=NULL)`.
 
@@ -236,6 +242,8 @@ Three scripts, each with one responsibility. All follow the existing `upsertX + 
   - Frontmatter: `source: notion`, `source_id`, `source_url`, `last_synced_at`, `tags: [<from Notion multi-select>]`.
 - Rate limiting: token bucket at 2.5 req/s with jitter; exponential backoff on 429s (1s → 2s → 4s → 8s, max 60s).
 - Updates cursor only after all pages for a database are successfully synced.
+- **Slug collision:** if two pages in the same database slugify to the same filename, append `-2`, `-3`, etc. to the later one's slug at write time.
+- **Cursor validation:** the JSON cursor map is validated before use. On parse error or schema mismatch, fall back to a full re-sync for that database and log a warning.
 - Vault indexer picks up the new/changed files on its next pass.
 
 ### 4.3 `scripts/sync-obsidian.ts` — one-time seed (re-runnable)
@@ -297,7 +305,7 @@ Three scripts, each with one responsibility. All follow the existing `upsertX + 
 - `CAPTURE_FOLDER` — default `captures/`
 - "Run initial vault scan" button — triggers `sync-obsidian.ts` + bin auto-seeding
 - "Reindex all" button — forces a full `vault-indexer.ts` scan ignoring mtime
-- "Re-seed bins from folders" button — re-runs bin auto-seeding (idempotent)
+- "Re-seed bins from folders" button — re-runs bin auto-seeding (idempotent). Confirmation dialog: *"This will re-apply automatic bin assignments based on folder locations and frontmatter. Your manual assignments are preserved, but any notes that currently have no bin assignments may be auto-assigned."*
 
 ### 5.5 Dependencies (new, pinned)
 
@@ -324,9 +332,10 @@ Existing deps (`better-sqlite3`, `next`, `react`, `ulid`, `tsx`) are unchanged.
    - Frontmatter includes `source: capture`, `created_at: <iso>`, `bins: [<bin-id>]`, `tags: [...]`
    - Body is the user's text
    - Written via atomic rename (`.tmp` file + `fs.rename`)
-4. `POST /api/notes/capture` invokes `vault-indexer.ts` for just this one file (synchronous, ~100ms), which creates the `vault_notes` row, `vault_notes_fts` row, `note_bins` row (from `bins: [...]` in frontmatter, `assigned_by='auto'`), and any `note_tags`.
-5. API returns 200 with the new note ID
-6. User sees toast: "Captured to <bin-name>"
+4. `POST /api/notes/capture` invokes `./node_modules/.bin/tsx scripts/vault-indexer.ts --file <path>` via `child_process.spawnSync` with a 5-second timeout. The one-shot indexer creates the `vault_notes` row, `vault_notes_fts` row, `note_bins` row (from `bins: [...]` in frontmatter, `assigned_by='auto'`), and any `note_tags`.
+5. **Error handling:** if the spawn fails (missing binary, crash, timeout, SQLite contention with a running cron pass), the API returns 200 with `{ ok: true, indexed: false, reason: '<error>' }` — the markdown file already exists on disk and the next cron tick will pick it up. This never makes the capture itself fail.
+6. On success, API returns 200 with the new note ID and `indexed: true`.
+7. User sees toast: "Captured to <bin-name>" (or "Captured — indexing…" if immediate index failed)
 
 **Invariant:** captures are markdown files first, DB records second. If the dashboard or indexer fails after writing the file but before indexing, the next cron scan picks it up automatically. If iCloud is slow, other devices get the file later. No fragile paths.
 
@@ -418,13 +427,14 @@ v3 will add:
 
 ### Phase 3 — Deploy (v1.2)
 
-12. **Cron entries** on Mac Mini:
+12. **Cron entries** on Mac Mini (uses `./node_modules/.bin/tsx` directly — portable across Intel/ARM, avoids hardcoded Node paths; `flock -n` prevents overlap on long scans; `mkdir -p` ensures backup targets exist):
     ```
-    */5 * * * * cd ~/Dashboard && /usr/local/bin/node node_modules/.bin/tsx scripts/vault-indexer.ts >> ~/Library/Logs/vault-indexer.log 2>&1
-    */15 * * * * cd ~/Dashboard && /usr/local/bin/node node_modules/.bin/tsx scripts/sync-notion.ts >> ~/Library/Logs/sync-notion.log 2>&1
-    0 3 * * * tar -czf ~/Backups/vault-$(date +\%Y\%m\%d).tar.gz ~/Vault
-    0 3 * * * cp ~/Dashboard/data/dashboard.db ~/Dashboard/data/backups/dashboard-$(date +\%Y\%m\%d).db
+    */5 * * * * cd ~/Dashboard && flock -n /tmp/vault-indexer.lock ./node_modules/.bin/tsx scripts/vault-indexer.ts >> ~/Library/Logs/vault-indexer.log 2>&1
+    */15 * * * * cd ~/Dashboard && flock -n /tmp/sync-notion.lock ./node_modules/.bin/tsx scripts/sync-notion.ts >> ~/Library/Logs/sync-notion.log 2>&1
+    0 3 * * * mkdir -p ~/Backups && tar -czf ~/Backups/vault-$(date +\%Y\%m\%d).tar.gz ~/Vault
+    0 3 * * * mkdir -p ~/Dashboard/data/backups && cp ~/Dashboard/data/dashboard.db ~/Dashboard/data/backups/dashboard-$(date +\%Y\%m\%d).db
     ```
+    Install `flock` on macOS via Homebrew: `brew install util-linux` (and add `$(brew --prefix)/opt/util-linux/bin` to PATH), or substitute a simple pidfile check inside each script.
 13. **launchd plist for the Next.js app itself** (as specified in the existing README — no daemon indexer needed).
 14. **Deploy to Mac Mini**, verify Tailscale access end-to-end, verify first cron cycles complete and populate data.
 
@@ -536,3 +546,19 @@ Changes applied based on simplicity audit (my own):
 - **Indexer architecture changed from chokidar daemon → cron scan.** Eliminates launchd lifecycle, silent daemon deaths, chokidar/FSEvents/iCloud interaction edge cases. Trade-off: up to 5 min lag for Obsidian edits vs. ~seconds with chokidar. Acceptable given iCloud's own 30s–2min baseline lag and single-user use.
 - **Capture flow triggers immediate one-shot indexer** (`vault-indexer.ts --file <path>`) so captures appear instantly without waiting for the next cron tick.
 - **launchd plist reduced to just the Next.js app itself** (as already specified in README). No separate daemon to manage.
+
+---
+
+## Appendix C — Changelog from v2 → v2.1
+
+Patches applied after second Kimi audit pass:
+
+- **Blocker: `deleted_at` column added** to `vault_notes` schema + partial index. §4.1's soft-delete logic now has a column to write to.
+- **Blocker: cron syntax fixed.** Switched from `node node_modules/.bin/tsx` to `./node_modules/.bin/tsx` directly. Portable across Intel + ARM Macs; uses tsx's own shebang to resolve Node.
+- **Overlap guard:** `flock -n /tmp/<name>.lock` wraps cron entries for the indexer and Notion sync. Long scans can't collide with the next tick.
+- **Backup dirs created on demand:** `mkdir -p` prepended to both backup cron lines so first-run doesn't silently fail.
+- **Capture flow error handling** (§6 step 5) now explicit: spawnSync with 5s timeout, catches errors, returns 200 with `indexed: false` and reason. The file exists on disk regardless; cron picks it up on the next pass.
+- **FTS5 comment clarified:** "CONTENTLESS" → "STANDALONE." Technically correct — the table stores its own title/content/tags, managed directly by the indexer, which is necessary for `snippet()` support.
+- **Slug collision handling** added to §4.2 for Notion pages that slugify to the same filename (append `-2`, `-3`).
+- **Cursor validation note** added to §4.2 — malformed JSON falls back to full re-sync for that database rather than failing.
+- **Re-seed confirmation dialog copy** added to §5.4 for the "Re-seed bins from folders" button, warning about auto-assignment of currently-unbinned notes.
