@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getClientBySlug, updateClientStatus } from "@/lib/queries/clients";
 import { listProjectsByClient } from "@/lib/queries/projects";
 import { listFilesByClient } from "@/lib/queries/files";
-import { listNotesByClient } from "@/lib/queries/notes";
+import { listVaultNotesByClient } from "@/lib/queries/vault-notes";
 import { listActivityByClient } from "@/lib/queries/activity";
 import { badRequest, isClientStatus, isOptionalString, readJson } from "@/lib/validation";
 
@@ -13,7 +13,7 @@ export async function GET(_req: Request, { params }: { params: { slug: string } 
     client,
     projects: listProjectsByClient(client.id),
     files: listFilesByClient(client.id),
-    notes: listNotesByClient(client.id),
+    notes: listVaultNotesByClient(client.id),
     activity: listActivityByClient(client.id),
   });
 }
