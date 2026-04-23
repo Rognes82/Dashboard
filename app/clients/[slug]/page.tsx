@@ -7,7 +7,7 @@ import { formatRelativeTime, activityBorderColor } from "@/lib/utils";
 import { getClientBySlug } from "@/lib/queries/clients";
 import { listProjectsByClient } from "@/lib/queries/projects";
 import { listFilesByClient } from "@/lib/queries/files";
-import { listNotesByClient } from "@/lib/queries/notes";
+import { listVaultNotesByClient } from "@/lib/queries/vault-notes";
 import { listActivityByClient } from "@/lib/queries/activity";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ export default function ClientHubPage({ params }: { params: { slug: string } }) 
 
   const projects = listProjectsByClient(client.id);
   const files = listFilesByClient(client.id, 5);
-  const notes = listNotesByClient(client.id, 5);
+  const notes = listVaultNotesByClient(client.id, 5);
   const activity = listActivityByClient(client.id, 10);
 
   return (
@@ -106,17 +106,17 @@ export default function ClientHubPage({ params }: { params: { slug: string } }) 
           ) : (
             <div className="flex flex-col gap-2">
               {notes.map((n) => (
-                <div key={n.id} className="bg-base rounded p-2.5">
+                <a key={n.id} href={`/notes/${n.id}`} className="block bg-base rounded p-2.5 hover:bg-hover">
                   <div className="flex items-center gap-1.5 mb-1">
                     <span className="text-xs text-text-primary font-medium">{n.title}</span>
                     <span className="text-[9px] bg-hover px-1.5 py-0.5 rounded-sm text-text-muted capitalize">
-                      {n.source.replace("_", " ")}
+                      {n.source}
                     </span>
                   </div>
-                  {n.content_preview && (
-                    <div className="text-[10px] text-text-secondary line-clamp-2">{n.content_preview}</div>
-                  )}
-                </div>
+                  <div className="text-[10px] text-text-muted mono">
+                    {n.vault_path}
+                  </div>
+                </a>
               ))}
             </div>
           )}
