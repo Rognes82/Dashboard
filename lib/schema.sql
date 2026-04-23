@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS sync_status (
   status TEXT NOT NULL,
   error_message TEXT,
   duration_ms INTEGER,
-  cursor TEXT
+  cursor TEXT  -- JSON blob, opaque to schema; shape interpreted by each sync script (e.g. {"db_id": "iso8601"})
 );
 
 CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id);
@@ -129,6 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_vault_notes_client ON vault_notes(client_id);
 CREATE INDEX IF NOT EXISTS idx_vault_notes_project ON vault_notes(project_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vault_notes_source_id ON vault_notes(source_id) WHERE source_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_vault_notes_deleted ON vault_notes(deleted_at) WHERE deleted_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_vault_notes_active_modified ON vault_notes(modified_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_bins_parent ON bins(parent_bin_id);
 CREATE INDEX IF NOT EXISTS idx_note_bins_note ON note_bins(note_id);
 CREATE INDEX IF NOT EXISTS idx_note_bins_bin ON note_bins(bin_id);
