@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { resetDbForTesting, closeDb } from "../../../lib/db";
-import { recordSyncRun, listSyncStatuses } from "../../../lib/queries/sync-status";
+import { recordSyncRun, listSyncStatuses, readSyncCursor } from "../../../lib/queries/sync-status";
 import fs from "fs";
 import path from "path";
 
@@ -32,5 +32,15 @@ describe("sync_status queries", () => {
     expect(statuses).toHaveLength(1);
     expect(statuses[0].status).toBe("error");
     expect(statuses[0].error_message).toBe("boom");
+  });
+
+  it("recordSyncRun persists and reads a cursor", () => {
+    recordSyncRun({ sync_name: "notion", status: "ok", cursor: '{"db1":"2026-04-23T00:00:00Z"}' });
+    const status = readSyncCursor("notion");
+    expect(status).toBe('{"db1":"2026-04-23T00:00:00Z"}');
+  });
+
+  it("readSyncCursor returns null when no row exists", () => {
+    expect(readSyncCursor("never-ran")).toBeNull();
   });
 });
