@@ -1,44 +1,56 @@
-import { Card } from "@/components/Card";
-import { Badge } from "@/components/Badge";
-import { listNotes } from "@/lib/queries/notes";
-import { formatRelativeTime } from "@/lib/utils";
+"use client";
 
-export const dynamic = "force-dynamic";
+import { useEffect, useState } from "react";
+import { BinTree } from "@/components/BinTree";
+import { NoteList } from "@/components/NoteList";
+import { SearchBar } from "@/components/SearchBar";
+import type { BinNode, VaultNote } from "@/lib/types";
 
 export default function NotesPage() {
-  const notes = listNotes(200);
+  const [bins, setBins] = useState<BinNode[]>([]);
+  const [selectedBinId, setSelectedBinId] = useState<string | null>(null);
+  const [notes, setNotes] = useState<VaultNote[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/bins")
+      .then((r) => r.json())
+      .then((d) => setBins(d.bins ?? []));
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    const url = selectedBinId
+      ? `/api/notes?bin=${encodeURIComponent(selectedBinId)}&limit=200`
+      : "/api/notes?limit=200";
+    fetch(url)
+      .then((r) => r.json())
+      .then((d) => setNotes(d.notes ?? []))
+      .finally(() => setLoading(false));
+  }, [selectedBinId]);
 
   return (
     <div>
-      <div className="mb-5">
-        <h1 className="mono text-lg font-semibold text-text-primary">Notes</h1>
-        <p className="text-xs text-text-muted mt-0.5">{notes.length} notes aggregated</p>
+      <div className="mb-5 flex items-center justify-between gap-4">
+        <div>
+          <h1 className="mono text-lg font-semibold text-text-primary">Notes</h1>
+          <p className="text-xs text-text-muted mt-0.5">
+            {loading ? "Loading…" : `${notes.length} notes${selectedBinId ? " in selected bin" : ""}`}
+          </p>
+        </div>
+        <div className="w-80">
+          <SearchBar />
+        </div>
       </div>
 
-      {notes.length === 0 ? (
-        <Card>
-          <p className="text-xs text-text-muted">
-            No notes aggregated yet. Notion, Apple Notes, and Obsidian sync are deferred to v2.
-          </p>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-2 gap-3">
-          {notes.map((n) => (
-            <Card key={n.id}>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-sm text-text-primary font-medium">{n.title}</span>
-                <Badge>{n.source.replace("_", " ")}</Badge>
-              </div>
-              {n.content_preview && (
-                <p className="text-xs text-text-secondary line-clamp-3">{n.content_preview}</p>
-              )}
-              <div className="text-[10px] text-text-muted mono mt-2">
-                {n.modified_at ? formatRelativeTime(n.modified_at) : "—"}
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
+      <div className="grid grid-cols-[240px_1fr] gap-4">
+        <aside className="bg-card border border-border rounded p-2 h-fit">
+          <BinTree bins={bins} selectedBinId={selectedBinId} onSelect={setSelectedBinId} />
+        </aside>
+        <main className="bg-card border border-border rounded">
+          <NoteList notes={notes} emptyMessage={selectedBinId ? "No notes in this bin." : "No notes yet. Run Settings → Initial vault scan."} />
+        </main>
+      </div>
     </div>
   );
 }
