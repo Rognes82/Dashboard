@@ -1,6 +1,7 @@
 export type ClientStatus = "active" | "paused" | "completed";
 export type FileSource = "local" | "gdrive" | "notion";
-export type NoteSource = "notion" | "apple_notes" | "obsidian";
+export type VaultNoteSource = "notion" | "obsidian" | "capture" | "apple-notes";
+export type AssignedBy = "auto" | "manual" | "agent";
 export type AgentType = "cron" | "discord_bot" | "daemon" | "script" | "manual";
 export type AgentStatus = "running" | "stopped" | "errored";
 export type SyncStatus = "ok" | "error";
@@ -41,15 +42,52 @@ export interface FileRecord {
   modified_at: string | null;
 }
 
-export interface Note {
+export interface VaultNote {
   id: string;
-  client_id: string | null;
+  vault_path: string;
   title: string;
-  content_preview: string | null;
-  source: NoteSource;
+  source: VaultNoteSource;
+  source_id: string | null;
   source_url: string | null;
-  tags: string | null;
-  modified_at: string | null;
+  content_hash: string;
+  created_at: string;
+  modified_at: string;
+  last_indexed_at: string;
+  deleted_at: string | null;
+  client_id: string | null;
+  project_id: string | null;
+}
+
+export interface Bin {
+  id: string;
+  name: string;
+  parent_bin_id: string | null;
+  source_seed: string | null;
+  created_at: string;
+  sort_order: number;
+}
+
+export interface BinNode extends Bin {
+  children: BinNode[];
+  note_count: number;
+}
+
+export interface NoteBin {
+  note_id: string;
+  bin_id: string;
+  assigned_at: string;
+  assigned_by: AssignedBy;
+}
+
+export interface NoteTag {
+  note_id: string;
+  tag: string;
+}
+
+export interface VaultNoteSearchHit {
+  note: VaultNote;
+  snippet: string;
+  rank: number;
 }
 
 export interface Agent {
@@ -81,4 +119,5 @@ export interface SyncStatusRecord {
   status: SyncStatus;
   error_message: string | null;
   duration_ms: number | null;
+  cursor: string | null;
 }
