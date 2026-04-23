@@ -16,7 +16,8 @@
     "init-db": "tsx scripts/init-db.ts",
     "sync:projects": "tsx scripts/sync-projects.ts",
     "sync:cron": "tsx scripts/sync-cron.ts",
-    "sync:agents": "tsx scripts/sync-agents.ts"
+    "sync:agents": "tsx scripts/sync-agents.ts",
+    "sync:vault": "tsx scripts/vault-indexer.ts"
   },
   "keywords": [],
   "author": "",
