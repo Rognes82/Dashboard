@@ -25,7 +25,9 @@ The underlying architecture (vault-as-backbone, SQLite-as-metadata) is unchanged
 - Restyled `/review` and `/settings` to match the new visual language
 - Right-side reading pane that opens on note-row click or citation click
 - Multi-provider LLM agent (Anthropic native + OpenAI-compatible) with profile management in settings
+- New dependencies: `@anthropic-ai/sdk` and `openai` (neither currently installed — Phase 2 installed `@notionhq/client` only)
 - Hidden-from-nav: `/clients`, `/projects`, `/agents`, `/files` (data stays, pages retired from primary UI)
+- New `POST /api/actions/sync-notion` endpoint to match the "run notion sync" button in Settings Actions (§5.5)
 - Updated Quick Capture modal and Global hotkey styling to match
 - New palette, typography system, icon set
 
@@ -159,6 +161,33 @@ Icon set (hand-drawn inline SVG, not a library):
 - Sidebar items: no borders; use `background-hover` on hover, `accent-tint + 2px accent left-border` on active/selected
 - Grid gaps: `16px` between cards, `8px` between items in a list, `2px` between rows in a note list
 
+### 4.5 States, transitions, and responsive rules
+
+**Disabled:** any interactive element with `disabled` attribute gets `opacity: 0.45`, `cursor: not-allowed`, no hover transitions. Applies to buttons, inputs, bin rows during loading.
+
+**Loading / skeleton:**
+- Chat streaming: blinking thin-caret cursor appears at the trailing edge of the agent's in-progress message (`animation: caret-blink 1s infinite`). Cursor is cyan.
+- Bin tree on first fetch: skeleton bars (three 10px-tall dim rectangles inside the sidebar body) until the bin tree resolves.
+- Note list on bin change: skeleton bars (five 16px-tall rows in the main area) during fetch.
+
+**Scrollbars:** Use `scrollbar-width: thin; scrollbar-color: #333 transparent;` (Firefox) and `::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }` (WebKit). Track is transparent; thumb is `#333` default, `#4a4944` hover.
+
+**Reading-pane transitions:** `transition: transform 200ms ease-out, opacity 200ms ease-out`. Open: `translateX(0)` + opacity 1. Closed: `translateX(100%)` + opacity 0. Main area width changes via CSS grid column sizing (no JS animation needed).
+
+**Z-index stacking:**
+```
+10   sidebar (fixed position, low but above base)
+20   reading pane
+30   scope badge, tooltips
+50   dropdowns (profile edit form, provider type selector)
+60   modals (Quick Capture, "delete bin" confirm, machine-key-lost recovery)
+70   toast notifications
+```
+
+**Responsive breakpoints** (basic only — this is a desktop-first Tailscale app):
+- `< 900px` (`md` breakpoint): reading pane becomes full-screen modal instead of side panel; clicking a note opens it as a modal, close via `×` or Esc.
+- `< 640px` (`sm`): sidebar collapses to icon strip only (48px); bin tree accessible via a slide-out hamburger menu; nav icons remain visible. This is a low-priority optimization — accept that the app is awkward on phones.
+
 ---
 
 ## 5. Primary Surfaces
@@ -188,11 +217,23 @@ Icon set (hand-drawn inline SVG, not a library):
 - Agent messages end with a **citation row** — chips with `↗ filename.md` in cyan mono inside a bordered pill. Clicking a chip opens the reading pane.
 - Input at bottom, always visible, pinned. Above input: a subtle `1px` top border.
 
+**Error states:**
+- **No profiles configured (first run):** replace the empty-state hero with a card titled "Configure your first LLM profile" with a primary button linking to `/settings`. Suggested prompts are hidden.
+- **Profile key invalid (HTTP 401 from provider):** inline red toast at bottom-right: `API key invalid — check Settings → Profiles`. Toast auto-dismisses after 6s.
+- **Rate limited (HTTP 429):** amber toast: `Rate limited. Retry in Xs.` where X comes from the `Retry-After` header (default 30).
+- **Provider 5xx or network error:** amber toast: `Agent unavailable — {short message}. Check your provider.` Message is streamed in-place in the assistant bubble as `(agent unavailable)` if partial response existed.
+- **Zero notes retrieved:** agent still sends the request with a system note that context is empty. If the agent response acknowledges no context, render it normally; no special UI. If retrieval fails entirely (FTS5 error), surface a red toast: `Search failed — see console`.
+- **Machine key missing on send:** block submission, show modal (see §7.3).
+
+**First-run experience:** if `app_settings` has no `llm.profiles`, chat is gated. If bins are empty, sidebar shows a muted message `No bins yet. Run Settings → Re-seed bins.` If the vault is empty, suggested prompts are hidden from chat empty-state (they'd have nothing to reference).
+
 ### 5.3 Bins browse mode (`/bins` or `/bins/[id]`)
 
 **Two-section layout inside main:**
 1. **Header:** breadcrumb (`content / reels / tokyo` in mono uppercase) + bin title (22px) + note count + filter chips (`all` / `obsidian` / `notion` / `capture`) aligned right
-2. **Note list:** one row per note. Columns: title (flex), source badge (mono), modified-at (mono right). Click row = opens reading pane. No per-note expand/collapse.
+2. **Note list:** one row per note. Columns: title (flex), source badge (mono), modified-at (mono right). Click row = opens reading pane (does NOT navigate). No per-note expand/collapse.
+
+**NoteList component change:** the existing `components/NoteList.tsx` wraps each row in `<Link href="/notes/${n.id}">`. For v1.2, replace that with an `onNoteClick?: (note: VaultNote) => void` prop. The Bins page passes a handler that opens the reading pane. The old `/notes/[id]` page remains addressable as a deep-link fallback (direct URL navigation), but internal clicks use the pane.
 
 **Empty bin:** centered mono message: `no notes in this bin yet`.
 
@@ -229,6 +270,7 @@ Grid of 4 cards:
 **Actions**
 - Ghost buttons: "run vault indexer", "re-seed bins from folders", "run notion sync"
 - Each shows "Running… / Done ✓" inline status on click
+- "run notion sync" requires a new endpoint: `POST /api/actions/sync-notion` that spawns `tsx scripts/sync-notion.ts` with a 120s timeout (longer than other actions because Notion API is slower). Same pattern as existing `reindex` and `seed-bins` action routes.
 
 **Sync Health**
 - Compact list in mono: `sync-name  ● Xm ago`
@@ -264,11 +306,28 @@ Same behavior as Phase 2 (⌘⇧C, textarea, bin picker, tags). Visual restyle o
 
 ## 6. Interaction Model
 
-### 6.1 Bin click behaviors
+### 6.1 Bin click behaviors and mode switching
 
-- **Click bin name** (in sidebar tree) → scopes the active chat to that bin. If currently in Chat mode, a cyan scope badge appears (`content / reels / tokyo`). If currently in Bins mode, main area navigates to `/bins/[bin-id]`.
-- **Click expand arrow** (chevron) → toggles the sub-tree. Does not change scope or route.
-- **Double-click bin name** (v1.5, optional polish) → forces navigation to `/bins/[bin-id]` regardless of current mode.
+Two pieces of app state matter: `activeMode` (chat | bins | review | settings) and `selectedBin` (bin id or null).
+
+**Click bin name** (in sidebar tree):
+- Always sets `selectedBin` to that bin id. This is the universal effect — the bin is "selected" regardless of mode.
+- If `activeMode === chat`: a cyan scope badge renders above the messages. The next chat message uses that bin's notes for retrieval.
+- If `activeMode === bins`: main area navigates to `/bins/[bin-id]` to show its note list.
+- If `activeMode` is review or settings: no navigation — the bin is selected (highlighted in sidebar) but the main area stays put. Useful precondition: user can click a bin, then click the Chat icon, and land in chat already scoped.
+
+**Click the currently selected bin again** (whether name or row): clears selection (`selectedBin = null`). Scope badge disappears in chat mode. In bins mode, main area navigates to `/bins` (the default unselected view).
+
+**Click a different bin**: replaces selection with the new bin. No special UI flicker — the active-row highlight animates.
+
+**Click expand arrow** (chevron): toggles the sub-tree only. Does not change selection, scope, or route.
+
+**Switching top-nav icons preserves `selectedBin`**:
+- Chat (scoped to bin A) → click Bins icon → lands on `/bins/bin-A` (bin still selected, now showing its notes).
+- Bins (viewing bin A) → click Chat icon → lands on chat with scope pre-set to bin A.
+- Reading pane state is orthogonal — pane stays open across nav icon clicks (it's a side layer, not part of the active mode's content).
+
+**Double-click bin name** (v1.5, optional polish): forces navigation to `/bins/[bin-id]` regardless of current mode. Not in v1.2.
 
 ### 6.2 Citation click
 
@@ -289,9 +348,13 @@ Clicking a `↗ filename.md` chip in a chat response:
 | `⌘↵` (in chat input) | Send message (alt) |
 | `esc` (in modal/pane) | Close it |
 
-### 6.4 Scope badge
+### 6.4 Scope badge and ephemerality
 
-When a bin is scoped to the chat, a badge shows: `content / reels / tokyo` in cyan outline with a small `×` to clear. The agent only retrieves from notes in the scoped bin + descendants. Scoping is ephemeral — persists until user clears it or starts a new chat.
+When a bin is scoped to the chat, a badge shows: `content / reels / tokyo` in cyan outline with a small `×` to clear. The agent only retrieves from notes in the scoped bin + descendants.
+
+**Scope persistence in v1.2:** since conversation history is not persisted (deferred to v1.4), every full page reload is effectively a new chat. Scope is stored in React state only, not in the URL or localStorage. Reloading clears the scope. Navigating between top-nav icons does NOT clear scope (it carries, as described in §6.1).
+
+**"New chat" action** (v1.4): when conversation history ships, a "new chat" button will clear the message history AND the scope.
 
 ---
 
@@ -314,17 +377,48 @@ interface LlmProfile {
   id: string;                          // ulid
   name: string;                        // "Claude direct" / "OpenRouter" / "Local LM Studio"
   type: "anthropic" | "openai-compatible";
-  api_key_encrypted: string;           // encrypted at rest
+  api_key_encrypted: string;           // AES-256-GCM ciphertext, base64; includes iv + auth tag
   base_url?: string;                   // required for openai-compatible
-  default_model: string;               // e.g. "claude-opus-4-7" or "moonshotai/kimi-k2.6-thinking"
-  cache_enabled?: boolean;             // anthropic only, default true
+  default_model: string;               // e.g. "claude-opus-4-7" or "moonshotai/kimi-k2"
+  max_context_tokens: number;          // retrieval budget; enforces per-model context limits
   created_at: string;                  // iso
 }
 ```
 
+**`max_context_tokens` defaults when adding a new profile:**
+- `anthropic` + claude-opus-4-7 / claude-sonnet-4-6: `200_000`
+- `anthropic` + claude-haiku-4-5: `200_000`
+- `openai-compatible` + OpenRouter generic: `128_000`
+- `openai-compatible` + local/unknown: `32_000` (conservative)
+
+The user can override the default in the profile form. The retrieval layer reads this value to cap context bytes (see §8.1).
+
+**Prompt caching:** intentionally omitted from v1.2. Anthropic's prompt caching requires `cache_control` markers on content blocks ≥1024 tokens and is most useful when the same system prompt is reused across many requests. Without conversation history persistence (v1.4), there's limited benefit to caching per-request. Revisit in v1.4.
+
 ### 7.3 API key encryption
 
-API keys are sensitive. Encrypted at rest in SQLite using `aes-256-gcm` with a machine-local key stored at `~/.config/dashboard/machine-key` (mode `0600`). Key is generated on first launch if absent. Rationale: the dashboard is Tailscale-only and filesystem access is already gated by the OS, but encrypted storage means a casual `sqlite3 data/dashboard.db .dump` leak doesn't reveal secrets.
+API keys are sensitive. Encrypted at rest in SQLite using `aes-256-gcm` via Node's builtin `crypto` module (no dependency) with a machine-local key stored at `~/.config/dashboard/machine-key` (mode `0600`, 32 random bytes). Key is generated on first launch if absent. Rationale: the dashboard is Tailscale-only and filesystem access is already gated by the OS, but encrypted storage means a casual `sqlite3 data/dashboard.db .dump` leak doesn't reveal secrets.
+
+**Recovery UX when the machine-key is missing or unreadable** (e.g. user reset `~/.config`, copied DB to a new machine without copying the key, permissions broke):
+
+On app startup, the server checks: does `~/.config/dashboard/machine-key` exist AND is it readable AND is the first 32 bytes valid?
+- If yes: continue normally.
+- If no AND `app_settings` has no `llm.profiles`: silently generate a new key. User is a first-time setup, nothing to lose.
+- If no AND `app_settings` HAS existing `llm.profiles` with non-empty `api_key_encrypted`: block app startup by returning a full-screen modal (route all requests to a recovery page). Modal copy:
+
+  > **Machine key missing**
+  >
+  > Your local encryption key (`~/.config/dashboard/machine-key`) can't be read. API keys stored in your LLM profiles are encrypted with this key and **cannot be recovered without it**.
+  >
+  > If you deleted it by accident, restore from backup and restart.
+  >
+  > Otherwise, you must delete the encrypted profiles and re-enter your API keys.
+  >
+  > **[ Delete all profiles and start fresh ]**
+
+  The button clears `llm.profiles` + `llm.active_profile_id` from `app_settings`, generates a new machine-key, and reloads. Other dashboard data (notes, bins, sync state) is unaffected — this only drops the LLM profiles.
+
+Encryption format: `iv (12 bytes) || authTag (16 bytes) || ciphertext` base64-encoded into the `api_key_encrypted` string.
 
 ### 7.4 Abstraction layer
 
@@ -359,18 +453,25 @@ When user clicks `+ add profile`, the form shows contextual help:
 
 When the user sends a message, `/api/chat`:
 
-1. Parses the active scope (if any bin is scoped)
-2. Runs FTS5 query using the user's message text (lowercased, whitespace-normalized, wrapped in FTS5 phrase quoting) as the MATCH expression, ranked by relevance
-3. If a scope is active, intersects FTS hits with notes in the scoped bin + descendants
-4. Takes top 10 hits + content of top 5 (full markdown, frontmatter stripped)
-5. Also includes: 5 most recently modified notes from the scoped bin (or across all bins if no scope), to provide recency signal
-6. Builds the prompt:
-   - **System:** `"You are the agent for Carter's personal knowledge vault. Answer ONLY using the provided notes. Cite sources by vault_path. If the answer isn't in the notes, say so explicitly. Be concise."`
-   - **User:** Chat history (if any in current session) + retrieved notes as context blocks + the new user message
-7. Streams response via the active profile's provider
-8. Parses citations: response is expected to include `vault_path` references; frontend renders them as clickable chips
+1. **Parse scope.** Read the active scope (if any bin is scoped); resolve its descendants to a set of `vault_notes.id`.
+2. **Build FTS5 MATCH expression.** Take the user's message, lowercase it, collapse whitespace, then wrap in phrase quoting: `safeQuery = '"${message.replace(/"/g, '""')}"'`. This matches the canonical sanitation already used by `app/api/notes/search/route.ts` — reuse that helper. Reason: raw user input can contain FTS5 operators (`"`, `*`, `NOT`, etc.) that cause SQLite syntax errors.
+3. **Run FTS5 query.** Use `searchVaultNotes(safeQuery, 20)` from Phase 1's `lib/queries/vault-notes.ts`. Intersect with scoped note IDs if scope is set.
+4. **Assemble context** under a byte budget:
+   - Load full file contents (via `fs.readFileSync(path.join(VAULT_PATH, note.vault_path), "utf-8")`) for each candidate note, top of FTS ranks first.
+   - Strip frontmatter using the existing `parseFrontmatter` from `lib/vault/frontmatter.ts` (Phase 1).
+   - Accumulate byte count. Stop adding notes when `accumulated_bytes × 4 > profile.max_context_tokens × 0.6` (reserving 40% of the window for output + prompt scaffolding + chat history). The `× 4` is a rough bytes-per-token heuristic — simple and defensible for English markdown.
+   - Always include at least 3 notes if any match; truncate the last note's content if it alone exceeds budget.
+5. **Add recency slots.** After FTS hits, append up to 5 most recently modified notes from the scoped set (or across all bins if unscoped) that aren't already included. Subject to the same byte budget.
+6. **Build the prompt:**
+   - **System:** `"You are the agent for Carter's personal knowledge vault. Answer ONLY using the provided notes. Be concise. After your prose answer, emit a <citations>...</citations> block listing the vault_paths you used, one per <cite path=\"…\"/> element. If the answer isn't in the notes, say so plainly and emit an empty <citations/>."`
+   - **User:** `Chat history (current session) + context blocks formatted as "=== vault_path ===\n{content}\n" for each note + the new user message.`
+7. **Stream response** via the active profile's provider through the `lib/llm/chat.ts` abstraction.
+8. **Parse citations.** Primary strategy: scan the streamed response for the trailing `<citations>…<cite path="…"/>…</citations>` block and extract paths. Render each as a chip. Fallback (if the `<citations>` block is absent — model didn't comply): regex-scan the response body for exact `vault_path` strings from the retrieved set. Frontend de-duplicates by path.
 
-Token budget under Opus 4.7 (1M context): generous. Even 20 full notes × 5KB = 100KB context, leaves plenty for output. For smaller-context models (Kimi K2 at 128K): limit to top 8 full notes, dropping recency slots first.
+**Token budget notes:**
+- A single large note (30KB+) is common in long-form vaults. The byte-budget assembler in step 4 handles this by dropping or truncating — prevents one note from monopolizing context.
+- `profile.max_context_tokens` is the authoritative budget source; the code reads it from the active profile (see §7.2), never hardcodes by model name.
+- For very small models (local 8B, 32K context): 19KB of context max (32K × 0.6 × bytes/token). Expect 3-5 notes at most. Acceptable degradation.
 
 ---
 
@@ -397,12 +498,19 @@ The following Phase 1 pages are **removed from primary navigation** but remain r
 
 | Old surface | What happens |
 |---|---|
-| `/clients` | URL still renders, but no nav link. `listClients()` still used by Capture (for attaching to a client) and potentially by future bin operations. |
-| `/projects` | URL still renders. Projects data keeps syncing via `sync-projects.ts`. |
-| `/agents` | URL still renders. `sync-agents.ts` still runs. |
-| `/files` | URL still renders. |
-| Existing `/notes` | **Deleted.** Replaced by `/bins` browse mode. |
-| Existing `/` dashboard home | **Deleted.** Replaced by chat mode (new `/`). |
+| `/clients` | URL still renders with the new layout (sidebar + main). A retired banner shows at the top of the page. |
+| `/projects` | Same — URL still renders with retired banner. Projects data keeps syncing via `sync-projects.ts`. |
+| `/agents` | URL renders with retired banner. `sync-agents.ts` still runs. |
+| `/files` | URL renders with retired banner. |
+| `/notes` (list) | **Replaced.** The `app/notes/page.tsx` is rewritten to redirect to `/bins` via `<script>window.location.replace("/bins")</script>` or server-side redirect. |
+| `/notes/[id]` | **Kept addressable.** Direct-link URLs still render the note detail view (for sharing, bookmarking), but internal clicks use the reading pane instead. |
+| Existing `/` dashboard home | **Replaced.** `app/page.tsx` now renders chat mode. |
+
+**Retired banner component** (new): a thin bar at the top of retired pages:
+```
+This page is retired from the primary nav. [Go to Chat →]
+```
+Off-white text on `background-hover`, with the link in cyan. Dismissible? No — if this page is still used, it's a deep-link reach and the banner is a useful signal.
 
 Data from these tables is preserved because (a) it might be useful again later (e.g. "mention a client from chat, agent pulls their context"), and (b) removing data is riskier than removing UI. If the user decides later that these pages should be fully deleted, that's a separate small cleanup.
 
@@ -440,7 +548,9 @@ Data from these tables is preserved because (a) it might be useful again later (
 |---|---|
 | Sidebar bin tree gets unwieldy at 50+ bins | Search is always-on (`/` hotkey). v1.5 adds depth-collapse ("show only top 2 levels"). |
 | Citation parsing relies on agent output format being consistent | Use XML-ish structured output in the prompt (`<cite path="..."/>`) to make parsing unambiguous. Fall back to path-matching via regex if XML absent. |
-| Multi-provider support expands the test surface | Mock the LLM in unit tests; integration tests cover one provider type (anthropic) end-to-end; manual smoke test covers profile switching. |
+| Multi-provider support expands the test surface | `lib/llm/chat.ts` returns an `AsyncIterable<LlmStreamChunk>` — unit-testable by mocking the provider to yield fake chunks. `app/api/chat/route.ts` is thin glue that wraps the iterable as an SSE `ReadableStream`; tested with a mock provider or covered by manual smoke. Integration test uses the Anthropic adapter against a stubbed fetch. OpenAI-compatible is tested against OpenRouter for one request in manual smoke. |
+| Accessibility gaps on new UI | Minimum a11y baseline: icon buttons have `aria-label`; bin tree uses `role="tree"` with `aria-expanded`/`aria-selected`; reading pane focuses on open and traps focus (Esc closes); chat input has `aria-label="Chat input"`; all focus states use `:focus-visible` with a 2px cyan outline. Deferred to v1.3: screen reader testing, high-contrast mode. |
+| Suggested prompts generation unclear | v1.2 uses a simple rule: take the 3 most recently modified notes (across all bins); generate prompt templates `Summarize {note.title}`, `What did I note about {first-tag-or-first-word}`, `What's in {top-level-bin}`. No LLM call to generate prompts — it's deterministic. If no notes exist, prompts are hidden. Smarter generation deferred to v1.3 agent work. |
 | Encrypted API key loss (machine-key file deleted) | On startup, if the key file is missing but profiles exist with encrypted keys, surface a clear error + regeneration flow. Back up the key as part of Mac Mini deploy setup. |
 | OpenAI-compatible endpoints vary in streaming format | Use `openai` SDK's iteration interface; most providers are compliant. If one isn't, add a provider-specific adapter inside `openai-compat.ts`. |
 | Token limits differ across models | Per-profile `max_context_tokens` field (default `200_000`). Retrieval layer respects it when assembling context. |
