@@ -6,7 +6,7 @@
 
 **Architecture:** Capture writes markdown directly to the vault (source-of-truth first, SQLite downstream via immediate indexer pass). Notion sync is a cron-driven script that reads targets from a new `app_settings` table, polls each configured database with a `last_edited_time > cursor` delta filter, converts block trees to markdown via a pure-function converter, and writes files atomically using `source_id` as the dedup key. The Review page is a single API route joining existing queries. Settings UI is mostly read-only status + a couple of editable lists + action buttons that spawn the existing scripts.
 
-**Tech Stack:** Same as Phase 1 — Next.js 14, better-sqlite3, Vitest, `@notionhq/client` (already installed). Adds `p-limit` for Notion rate limiting (to install).
+**Tech Stack:** Same as Phase 1 — Next.js 14, better-sqlite3, Vitest, `@notionhq/client` (already installed). No new dependencies — Notion rate limiting uses a small inline `RateLimiter` class (see Task 10) rather than adding `p-limit` (which is ESM-only and would fail in our CommonJS context).
 
 **Spec reference:** `docs/superpowers/specs/2026-04-23-thought-organizer-design.md` §4.2 (Notion sync), §5.4 (Settings), §6 (Capture flow), §8 (Review).
 
@@ -56,28 +56,27 @@ Parts A–E are sequenced so each part produces something testable:
 
 ---
 
-### Task 1: Install `p-limit`
+### Task 1: Verify Phase 1 baseline
 
-**Files:** Modify `package.json`, `package-lock.json`
+No dependency install required — the Notion rate limiter is inlined in Task 10 (see "NotionClient wrapper"). This is a pure verification task: confirm we're starting from a green Phase 1 baseline before Phase 2 work begins.
 
-- [ ] **Step 1: Install**
+**Files:** none.
 
-Run:
-```bash
-npm install p-limit@^6.2
-```
-
-- [ ] **Step 2: Verify tests still pass**
+- [ ] **Step 1: Run full suite on current branch**
 
 Run: `npm test`
-Expected: 85 passing (Phase 1 baseline).
+Expected: 85 passing, 17 test files. If any test fails, STOP and resolve before proceeding.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 2: Confirm branch is clean**
 
-```bash
-git add package.json package-lock.json
-git commit -m "deps: add p-limit for notion rate limiting"
-```
+Run: `git status`
+Expected: `nothing to commit, working tree clean` (ignoring any untracked `ref/` folder from earlier).
+
+- [ ] **Step 3: No commit**
+
+This task produces no file changes.
+
+**Why no p-limit?** `p-limit@^6` is ESM-only, and our project is `"type": "commonjs"`. Importing it via `tsx`-run scripts would throw `ERR_REQUIRE_ESM`. Rather than pin to the last CJS-compatible `p-limit@^4`, we use a small inline `RateLimiter` class in Task 10 — 15 lines, no dependency, easier to reason about, and `pLimit(1)` was effectively sequential execution anyway.
 
 ---
 
@@ -1177,11 +1176,11 @@ Create `lib/notion/client.ts`:
 
 ```typescript
 import { Client } from "@notionhq/client";
-import pLimit from "p-limit";
 import type { NotionBlock } from "./blocks-to-markdown";
 
 const MIN_GAP_MS = 400; // ~2.5 req/s
 const MAX_RETRIES = 5;
+const MAX_BLOCK_DEPTH = 10;
 
 export interface NotionPage {
   id: string;
@@ -1197,25 +1196,47 @@ export interface NotionDatabase {
   title: string;
 }
 
+/**
+ * Inline rate limiter — chains calls via a single Promise queue, enforcing a
+ * minimum gap between request starts. No external dep (p-limit is ESM-only).
+ */
+class RateLimiter {
+  private queue: Promise<unknown> = Promise.resolve();
+  private lastAt = 0;
+
+  constructor(private minGapMs: number) {}
+
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(async () => {
+      const delta = Date.now() - this.lastAt;
+      if (delta < this.minGapMs) {
+        await new Promise((r) => setTimeout(r, this.minGapMs - delta));
+      }
+      this.lastAt = Date.now();
+      return fn();
+    });
+    // Keep the chain alive regardless of success/failure so later callers still wait.
+    this.queue = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result as Promise<T>;
+  }
+}
+
 export class NotionClient {
   private client: Client;
-  private limit = pLimit(1);
-  private lastRequestAt = 0;
+  private rl = new RateLimiter(MIN_GAP_MS);
 
   constructor(token: string) {
     this.client = new Client({ auth: token, notionVersion: "2026-03-11" });
   }
 
   private async call<T>(fn: () => Promise<T>): Promise<T> {
-    return this.limit(async () => {
-      const delta = Date.now() - this.lastRequestAt;
-      if (delta < MIN_GAP_MS) {
-        await new Promise((r) => setTimeout(r, MIN_GAP_MS - delta));
-      }
+    return this.rl.run(async () => {
       let attempt = 0;
       while (true) {
         try {
-          this.lastRequestAt = Date.now();
           return await fn();
         } catch (err: unknown) {
           const e = err as { code?: string; status?: number };
@@ -1266,7 +1287,11 @@ export class NotionClient {
     return pages;
   }
 
-  async getBlocks(block_id: string): Promise<NotionBlock[]> {
+  async getBlocks(block_id: string, depth = 0): Promise<NotionBlock[]> {
+    if (depth > MAX_BLOCK_DEPTH) {
+      console.warn(`[notion] block tree exceeded MAX_BLOCK_DEPTH (${MAX_BLOCK_DEPTH}) at ${block_id}; truncating`);
+      return [];
+    }
     const out: NotionBlock[] = [];
     let cursor: string | undefined;
     do {
@@ -1277,10 +1302,10 @@ export class NotionClient {
       cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
     } while (cursor);
 
-    // Recursively fetch children for blocks with has_children
+    // Recursively fetch children for blocks with has_children, up to MAX_BLOCK_DEPTH
     for (const block of out) {
       if (block.has_children) {
-        block.children = await this.getBlocks(block.id);
+        block.children = await this.getBlocks(block.id, depth + 1);
       }
     }
     return out;
@@ -1575,6 +1600,51 @@ describe("sync-notion", () => {
     expect(listVaultNotes(100)).toHaveLength(0);
     fs.rmSync(vault, { recursive: true, force: true });
   });
+
+  it("continues past a failing database and preserves cursor for successful ones", async () => {
+    const vault = tempVault();
+    setSettingJson("notion.sync_targets", ["db-good", "db-bad", "db-also-good"]);
+
+    const throwingClient = {
+      async getDatabase(id: string) {
+        if (id === "db-bad") throw new Error("simulated auth failure");
+        return { id, title: id === "db-good" ? "Good" : "Also Good" };
+      },
+      async queryPages(db_id: string) {
+        if (db_id === "db-bad") throw new Error("should never reach queryPages on bad");
+        return [
+          {
+            id: `${db_id}-page-1`,
+            url: `https://notion.so/${db_id}-1`,
+            title: `${db_id} Page`,
+            last_edited_time: "2026-04-24T09:00:00Z",
+            markdown: "body",
+          },
+        ];
+      },
+    };
+
+    await runSyncNotion({ vaultPath: vault, client: throwingClient });
+
+    // Both good DBs wrote their page
+    expect(getVaultNoteBySourceId("db-good-page-1")).not.toBeNull();
+    expect(getVaultNoteBySourceId("db-also-good-page-1")).not.toBeNull();
+
+    // Sync status records "error" due to db-bad, but cursor reflects success for the others
+    const { readSyncCursor, listSyncStatuses } = await import("../../lib/queries/sync-status");
+    const status = listSyncStatuses().find((s) => s.sync_name === "sync-notion");
+    expect(status?.status).toBe("error");
+    expect(status?.error_message).toContain("db-bad");
+
+    const cursorRaw = readSyncCursor("sync-notion");
+    expect(cursorRaw).toBeTruthy();
+    const cursor = JSON.parse(cursorRaw!);
+    expect(cursor["db-good"]).toBe("2026-04-24T09:00:00Z");
+    expect(cursor["db-also-good"]).toBe("2026-04-24T09:00:00Z");
+    expect(cursor["db-bad"]).toBeUndefined();
+
+    fs.rmSync(vault, { recursive: true, force: true });
+  });
 });
 ```
 
@@ -1671,92 +1741,108 @@ export async function runSyncNotion(deps: NotionSyncDeps): Promise<void> {
   }
 
   let cursorMap = parseCursor(readSyncCursor("sync-notion"));
+  const errors: string[] = [];
 
   for (const db_id of targets) {
-    const db = await deps.client.getDatabase(db_id);
-    const dbSlug = slugify(db.title);
-    const since = getDbCursor(cursorMap, db_id);
-    const pages = await deps.client.queryPages(db_id, since);
-    pages.sort((a, b) => a.last_edited_time.localeCompare(b.last_edited_time));
+    try {
+      const db = await deps.client.getDatabase(db_id);
+      const dbSlug = slugify(db.title);
+      const since = getDbCursor(cursorMap, db_id);
+      const pages = await deps.client.queryPages(db_id, since);
+      pages.sort((a, b) => (a.last_edited_time < b.last_edited_time ? -1 : 1));
 
-    const absDir = path.join(deps.vaultPath, "notion-sync", dbSlug);
-    const reservedThisRun = new Set<string>();
+      const absDir = path.join(deps.vaultPath, "notion-sync", dbSlug);
+      const reservedThisRun = new Set<string>();
 
-    let latestTimestamp = since;
-    for (const page of pages) {
-      const slug = slugify(page.title);
-      const existing = getVaultNoteBySourceId(page.id);
+      let latestTimestamp = since;
+      for (const page of pages) {
+        const slug = slugify(page.title);
+        const existing = getVaultNoteBySourceId(page.id);
 
-      // Determine target filename (respecting collisions)
-      let filename: string;
-      if (existing) {
-        // Preserve existing filename if title hasn't changed or slugs match
-        const existingFilename = path.basename(existing.vault_path);
-        const existingSlug = existingFilename.replace(/\.md$/, "");
-        if (existingSlug === slug || existingSlug.startsWith(slug + "-")) {
-          filename = existingFilename;
-          reservedThisRun.add(filename);
+        // Determine target filename (respecting collisions)
+        let filename: string;
+        if (existing) {
+          // Preserve existing filename if title hasn't changed or slugs match
+          const existingFilename = path.basename(existing.vault_path);
+          const existingSlug = existingFilename.replace(/\.md$/, "");
+          if (existingSlug === slug || existingSlug.startsWith(slug + "-")) {
+            filename = existingFilename;
+            reservedThisRun.add(filename);
+          } else {
+            filename = resolveUniquePath(absDir, slug, reservedThisRun);
+          }
         } else {
           filename = resolveUniquePath(absDir, slug, reservedThisRun);
         }
-      } else {
-        filename = resolveUniquePath(absDir, slug, reservedThisRun);
+
+        const newRelPath = path.posix.join("notion-sync", dbSlug, filename);
+        const newAbsPath = path.join(deps.vaultPath, newRelPath);
+
+        // If the row exists and path changed, remove the old file first
+        if (existing && existing.vault_path !== newRelPath) {
+          const oldAbs = path.join(deps.vaultPath, existing.vault_path);
+          if (fs.existsSync(oldAbs)) fs.unlinkSync(oldAbs);
+        }
+
+        const frontmatter = buildFrontmatter({
+          source_id: page.id,
+          source_url: page.url,
+          created_at: existing?.created_at ?? page.last_edited_time,
+          last_synced_at: nowIso(),
+        });
+        const fileBody = frontmatter + page.markdown + "\n";
+        atomicWrite(newAbsPath, fileBody);
+
+        const { data: fm, body } = parseFrontmatter(fileBody);
+        const title = deriveTitle({ ...fm, title: page.title }, body, newRelPath);
+        const contentHash = hashContent(fileBody);
+        const note = upsertVaultNote({
+          vault_path: newRelPath,
+          title,
+          source: "notion",
+          source_id: page.id,
+          source_url: page.url,
+          content_hash: contentHash,
+          modified_at: page.last_edited_time,
+          created_at: existing?.created_at ?? page.last_edited_time,
+        });
+
+        // Refresh FTS for this note
+        const plainText = markdownToPlainText(body);
+        const inlineTags = extractInlineTags(body);
+        const fmTags = Array.isArray(fm.tags) ? (fm.tags as string[]) : [];
+        const tags = Array.from(new Set([...fmTags, ...inlineTags]));
+        updateFtsRow({ note_id: note.id, title, plain_text: plainText, tags: tags.join(" ") });
+
+        if (!latestTimestamp || page.last_edited_time > latestTimestamp) {
+          latestTimestamp = page.last_edited_time;
+        }
       }
 
-      const newRelPath = path.posix.join("notion-sync", dbSlug, filename);
-      const newAbsPath = path.join(deps.vaultPath, newRelPath);
-
-      // If the row exists and path changed, remove the old file first
-      if (existing && existing.vault_path !== newRelPath) {
-        const oldAbs = path.join(deps.vaultPath, existing.vault_path);
-        if (fs.existsSync(oldAbs)) fs.unlinkSync(oldAbs);
+      if (latestTimestamp && latestTimestamp !== since) {
+        cursorMap = updateCursor(cursorMap, db_id, latestTimestamp);
+        // Persist incrementally so a failure on a later DB doesn't lose this DB's progress
+        recordSyncRun({
+          sync_name: "sync-notion",
+          status: "ok",
+          cursor: serializeCursor(cursorMap),
+        });
       }
-
-      const frontmatter = buildFrontmatter({
-        source_id: page.id,
-        source_url: page.url,
-        created_at: existing?.created_at ?? page.last_edited_time,
-        last_synced_at: nowIso(),
-      });
-      const fileBody = frontmatter + page.markdown + "\n";
-      atomicWrite(newAbsPath, fileBody);
-
-      const { data: fm, body } = parseFrontmatter(fileBody);
-      const title = deriveTitle({ ...fm, title: page.title }, body, newRelPath);
-      const contentHash = hashContent(fileBody);
-      const note = upsertVaultNote({
-        vault_path: newRelPath,
-        title,
-        source: "notion",
-        source_id: page.id,
-        source_url: page.url,
-        content_hash: contentHash,
-        modified_at: page.last_edited_time,
-        created_at: existing?.created_at ?? page.last_edited_time,
-      });
-
-      // Refresh FTS for this note
-      const plainText = markdownToPlainText(body);
-      const inlineTags = extractInlineTags(body);
-      const fmTags = Array.isArray(fm.tags) ? (fm.tags as string[]) : [];
-      const tags = Array.from(new Set([...fmTags, ...inlineTags]));
-      updateFtsRow({ note_id: note.id, title, plain_text: plainText, tags: tags.join(" ") });
-
-      if (!latestTimestamp || page.last_edited_time > latestTimestamp) {
-        latestTimestamp = page.last_edited_time;
-      }
-    }
-
-    if (latestTimestamp && latestTimestamp !== since) {
-      cursorMap = updateCursor(cursorMap, db_id, latestTimestamp);
+    } catch (dbErr) {
+      const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+      errors.push(`${db_id}: ${msg}`);
+      console.error(`[sync-notion] DB ${db_id} failed:`, dbErr);
+      // Continue to next DB — partial progress from prior DBs is preserved in cursorMap
     }
   }
 
+  // Final status reflects overall health; cursor may already be persisted per-DB above.
   recordSyncRun({
     sync_name: "sync-notion",
-    status: "ok",
+    status: errors.length > 0 ? "error" : "ok",
     duration_ms: Date.now() - started,
     cursor: serializeCursor(cursorMap),
+    error_message: errors.length > 0 ? errors.join("; ").slice(0, 500) : null,
   });
 }
 
@@ -1821,7 +1907,7 @@ if (require.main === module) {
 npm test -- tests/scripts/sync-notion.test.ts
 ```
 
-Expected: 5 tests pass.
+Expected: 6 tests pass.
 
 - [ ] **Step 5: Add npm script**
 
@@ -2392,7 +2478,7 @@ export default function SettingsPage() {
         setNotionTargets(t);
         setTargetsInput(t.join("\n"));
       });
-    fetch("/api/system").then((r) => r.json()).then((d) => setSync(d.sync_statuses ?? []));
+    fetch("/api/system").then((r) => r.json()).then((d) => setSync(d.sync ?? []));
   }, []);
 
   async function saveTargets() {
@@ -2512,7 +2598,7 @@ git commit -m "feat(ui): settings adds notion targets + actions + sync health"
 
 **Files:** none.
 
-- [ ] **Step 1: `npm test`** — expect ~120 tests passing (85 Phase 1 + ~35 Phase 2 new).
+- [ ] **Step 1: `npm test`** — expect ~123 tests passing (85 Phase 1 + 38 Phase 2 new: 7 app-settings + 7 slug + 7 cursor + 8 blocks-to-markdown + 6 sync-notion + 3 review).
 
 - [ ] **Step 2: `npm run lint`** — expect clean.
 
@@ -2595,7 +2681,11 @@ VAULT_PATH=$HOME/Vault npm run dev
 - §8 Review surface — Tasks 13 (stale bins), 14 (API), 15 (page), 16 (nav)
 - §12 Risks — the spec's "cursor validation" risk is addressed by Task 9's graceful parse; "slug collision" is addressed in Task 12's `resolveUniquePath`
 
-Gaps: none within the Phase 2 scope. The settings UI intentionally leaves `VAULT_PATH` and `NOTION_TOKEN` as env-only for v1.1 — those are deployment-time concerns, not runtime knobs, and exposing them in the UI adds more complexity than value. Phase 3 agent work, Apple Notes, and deploy automation are still deferred.
+Gaps: none blocking within the Phase 2 scope. A few known v1.1 limitations, intentionally deferred:
+
+- **Notion multi-select tags not written to frontmatter.** Task 12's `buildFrontmatter` includes source/source_id/source_url/created_at/last_synced_at but does not currently pull `tags` from Notion page multi-select properties. The spec calls for it. Adding later is a 10-line change in `buildFrontmatter` + extraction from `page.properties`; defer until someone actually uses Notion multi-selects for tagging.
+- **`VAULT_PATH` and `NOTION_TOKEN` stay env-only.** Deployment-time concerns, not runtime knobs. Exposing them in the UI would add complexity (writing to `.env.local`, permissions, restart requirements) with no real benefit for a single-user app.
+- **Phase 3 agent work, Apple Notes, deploy automation** — all still deferred to their own plans.
 
 **Placeholder scan:** clean. No "TBD"/"implement later"/"similar to Task N" patterns. All code blocks complete.
 
