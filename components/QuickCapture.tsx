@@ -88,11 +88,11 @@ export function QuickCapture({ open, onClose, onCaptured }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center pt-[18vh] bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-start justify-center pt-[18vh] bg-black/70 backdrop-blur-md"
       onClick={onClose}
     >
       <div
-        className="bg-card border border-border rounded-lg shadow-xl w-[min(640px,90vw)] p-4 flex flex-col gap-3"
+        className="bg-raised border border-border-default rounded-lg shadow-xl w-[min(640px,90vw)] p-4 flex flex-col gap-3"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -119,7 +119,7 @@ export function QuickCapture({ open, onClose, onCaptured }: Props) {
           }}
           placeholder="What's on your mind?"
           rows={6}
-          className="w-full bg-base border border-border rounded p-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent-green focus:outline-none resize-none"
+          className="w-full bg-sunken border border-border-default rounded p-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:shadow-[0_0_0_3px_rgba(125,211,252,0.06)] resize-none"
         />
         <div className="grid grid-cols-[1fr_1fr] gap-2">
           <label className="flex flex-col gap-1">
@@ -127,7 +127,7 @@ export function QuickCapture({ open, onClose, onCaptured }: Props) {
             <select
               value={binId}
               onChange={(e) => setBinId(e.target.value)}
-              className="bg-base border border-border rounded px-2 py-1.5 text-xs text-text-primary focus:border-accent-green focus:outline-none"
+              className="bg-sunken border border-border-default rounded px-2 py-1.5 text-xs text-text-primary focus:border-accent focus:outline-none"
             >
               {flat.length === 0 && <option value="">(no bins yet)</option>}
               {flat.map((b) => (
@@ -145,7 +145,7 @@ export function QuickCapture({ open, onClose, onCaptured }: Props) {
               value={tags}
               onChange={(e) => setTags(e.target.value)}
               placeholder="idea, inbox"
-              className="bg-base border border-border rounded px-2 py-1.5 text-xs text-text-primary focus:border-accent-green focus:outline-none"
+              className="bg-sunken border border-border-default rounded px-2 py-1.5 text-xs text-text-primary focus:border-accent focus:outline-none"
             />
           </label>
         </div>
@@ -155,7 +155,7 @@ export function QuickCapture({ open, onClose, onCaptured }: Props) {
           <button
             onClick={submit}
             disabled={submitting}
-            className="bg-accent-green text-black text-xs font-medium px-3 py-1.5 rounded hover:bg-accent-green/90 disabled:opacity-50"
+            className="bg-accent text-black text-xs font-medium px-3 py-1.5 rounded hover:bg-accent/90 disabled:opacity-50"
           >
             {submitting ? "Saving…" : "Capture"}
           </button>
