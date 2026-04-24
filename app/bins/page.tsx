@@ -1,0 +1,43 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { NoteList } from "@/components/NoteList";
+import { ReadingPane } from "@/components/ReadingPane";
+import type { VaultNote } from "@/lib/types";
+
+export default function BinsDefaultPage() {
+  const [notes, setNotes] = useState<VaultNote[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [reading, setReading] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch("/api/notes?limit=100")
+      .then((r) => r.json())
+      .then((d) => setNotes(d.notes ?? []))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="h-screen flex flex-col">
+      <div className="px-6 py-4 border-b border-border-subtle">
+        <div className="mono text-2xs text-text-dim uppercase tracking-wider mb-1">workspace</div>
+        <h1 className="text-xl text-text-primary font-medium">Recent</h1>
+        <div className="text-2xs text-text-muted mt-1 mono">Pick a bin from the sidebar to browse it.</div>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {loading ? (
+          <div className="text-xs text-text-muted p-6">Loading…</div>
+        ) : (
+          <NoteList
+            notes={notes}
+            onNoteClick={(n) => setReading(n.vault_path)}
+            selectedPath={reading}
+            emptyMessage="No notes yet."
+          />
+        )}
+      </div>
+      {reading && <ReadingPane path={reading} onClose={() => setReading(null)} />}
+    </div>
+  );
+}
