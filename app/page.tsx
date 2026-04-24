@@ -1,47 +1,225 @@
-import { StatCard } from "@/components/StatCard";
-import { ClientPipeline } from "@/components/ClientPipeline";
-import { ActivityFeed } from "@/components/ActivityFeed";
-import { listClients } from "@/lib/queries/clients";
-import { listProjects } from "@/lib/queries/projects";
-import { listAgents } from "@/lib/queries/agents";
-import { listRecentActivity } from "@/lib/queries/activity";
-import { listFiles } from "@/lib/queries/files";
+"use client";
 
-export const dynamic = "force-dynamic";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
+import { ChatMessages, parseCitations, type ChatMessage } from "@/components/chat/ChatMessages";
+import { ChatInput } from "@/components/chat/ChatInput";
+import { ScopeBadge } from "@/components/chat/ScopeBadge";
+import { ToastProvider, useToast } from "@/components/chat/ToastProvider";
+import { ReadingPane } from "@/components/ReadingPane";
 
-export default function DashboardPage() {
-  const clients = listClients();
-  const projects = listProjects();
-  const agents = listAgents();
-  const activity = listRecentActivity(10);
-  const files = listFiles(1000);
+interface SuggestedPromptsResponse {
+  prompts: string[];
+}
 
-  const activeClients = clients.filter((c) => c.status === "active").length;
-  const assignedProjects = projects.filter((p) => p.client_id).length;
-  const runningAgents = agents.filter((a) => a.status === "running").length;
-  const cronJobs = agents.filter((a) => a.type === "cron").length;
+function newId() {
+  return Math.random().toString(36).slice(2);
+}
+
+function ChatPageInner() {
+  const router = useRouter();
+  const { show } = useToast();
+  const [profileReady, setProfileReady] = useState<boolean | null>(null);
+  const [activeModel, setActiveModel] = useState<string>("");
+  const [selectedBinId, setSelectedBinId] = useState<string | null>(null);
+  const [scopeName, setScopeName] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [suggested, setSuggested] = useState<string[]>([]);
+  const [streaming, setStreaming] = useState(false);
+  const [readingPath, setReadingPath] = useState<string | null>(null);
+  const [presetText, setPresetText] = useState<string>("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch("/api/settings/profiles")
+      .then((r) => r.json())
+      .then((d: { profiles: { id: string; default_model?: string }[]; active_id: string | null }) => {
+        if (!d.active_id) {
+          setProfileReady(false);
+          return;
+        }
+        setProfileReady(true);
+        const active = d.profiles.find((p) => p.id === d.active_id);
+        if (active?.default_model) setActiveModel(active.default_model);
+      });
+  }, []);
+
+  useEffect(() => {
+    const host = document.querySelector("main");
+    const observer = new MutationObserver(() => {
+      const binAttr = host?.getAttribute("data-selected-bin") ?? "";
+      setSelectedBinId(binAttr ? binAttr : null);
+    });
+    if (host) observer.observe(host, { attributes: true, attributeFilter: ["data-selected-bin"] });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedBinId) {
+      setScopeName(null);
+      return;
+    }
+    fetch(`/api/bins`)
+      .then((r) => r.json())
+      .then((d: { bins: { id: string; name: string; children?: { id: string; name: string }[] }[] }) => {
+        const find = (nodes: typeof d.bins, id: string, path: string[]): string[] | null => {
+          for (const n of nodes) {
+            const next = [...path, n.name];
+            if (n.id === id) return next;
+            if (n.children) {
+              const inner = find(n.children as typeof d.bins, id, next);
+              if (inner) return inner;
+            }
+          }
+          return null;
+        };
+        const p = find(d.bins, selectedBinId, []);
+        setScopeName(p ? p.join(" / ") : null);
+      });
+  }, [selectedBinId]);
+
+  useEffect(() => {
+    fetch("/api/chat/suggested-prompts")
+      .then((r) => (r.ok ? (r.json() as Promise<SuggestedPromptsResponse>) : { prompts: [] }))
+      .then((d) => setSuggested(d.prompts ?? []))
+      .catch(() => setSuggested([]));
+  }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const submit = useCallback(
+    async (text: string) => {
+      const userMsg: ChatMessage = { id: newId(), role: "user", content: text };
+      const assistantMsg: ChatMessage = { id: newId(), role: "assistant", content: "", streaming: true };
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+      setStreaming(true);
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [...messages, userMsg].map((m) => ({ role: m.role, content: m.content })),
+            scope_bin_id: selectedBinId,
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          show(data.error ?? `Chat failed (${res.status})`, "error");
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsg.id ? { ...m, content: "(agent unavailable)", streaming: false } : m
+            )
+          );
+          setStreaming(false);
+          return;
+        }
+        if (!res.body) throw new Error("no response body");
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let citations: string[] = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const data = line.slice(5).trim();
+            if (!data) continue;
+            let event: { type: string; text?: string; message?: string; paths?: string[] };
+            try {
+              event = JSON.parse(data);
+            } catch {
+              continue;
+            }
+            if (event.type === "retrieved" && event.paths) {
+              citations = event.paths;
+            } else if (event.type === "text" && event.text) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsg.id ? { ...m, content: m.content + event.text } : m
+                )
+              );
+            } else if (event.type === "error") {
+              show(event.message ?? "Agent error", "error");
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsg.id ? { ...m, content: m.content + " (agent error)" } : m
+                )
+              );
+            }
+          }
+        }
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== assistantMsg.id) return m;
+            const { cites } = parseCitations(m.content);
+            return { ...m, streaming: false, citations: cites.length > 0 ? cites : citations };
+          })
+        );
+      } catch (err) {
+        show(err instanceof Error ? err.message : "Agent unreachable", "error");
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantMsg.id ? { ...m, streaming: false } : m))
+        );
+      } finally {
+        setStreaming(false);
+      }
+    },
+    [messages, selectedBinId, show]
+  );
+
+  if (profileReady === null) {
+    return <div className="text-xs text-text-muted p-6">Loading…</div>;
+  }
 
   return (
-    <div>
-      <div className="mb-5">
-        <h1 className="mono text-lg font-semibold text-text-primary">Dashboard</h1>
-        <p className="text-xs text-text-muted mt-0.5">
-          {new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
-        </p>
+    <div className="flex flex-col h-screen">
+      {scopeName && (
+        <div className="border-b border-border-subtle px-6 py-2 flex items-center gap-3">
+          <span className="mono text-2xs text-text-subtle uppercase tracking-wider">Scope</span>
+          <ScopeBadge label={scopeName.toLowerCase()} onClear={() => setSelectedBinId(null)} />
+          {activeModel && (
+            <span className="ml-auto mono text-2xs text-text-dim">{activeModel}</span>
+          )}
+        </div>
+      )}
+      <div className="flex-1 overflow-y-auto">
+        {messages.length === 0 ? (
+          <div className="h-full flex items-center justify-center">
+            <ChatEmptyState
+              user_name="Carter"
+              has_profile={profileReady}
+              suggested_prompts={suggested}
+              onPickPrompt={(p) => setPresetText(p)}
+              onGoToSettings={() => router.push("/settings")}
+            />
+          </div>
+        ) : (
+          <>
+            <ChatMessages messages={messages} onCitationClick={setReadingPath} />
+            <div ref={messagesEndRef} />
+          </>
+        )}
       </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
-        <StatCard label="Clients" value={clients.length} subtext={`${activeClients} active`} subtextColor="green" />
-        <StatCard label="Projects" value={projects.length} subtext={`${assignedProjects} assigned`} subtextColor="green" />
-        <StatCard label="Agents" value={runningAgents} subtext="running" />
-        <StatCard label="Cron Jobs" value={cronJobs} subtext="scheduled" />
-        <StatCard label="Files" value={files.length} subtext="indexed" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <ClientPipeline clients={clients} />
-        <ActivityFeed items={activity} />
-      </div>
+      <ChatInput onSubmit={submit} disabled={streaming || !profileReady} presetText={presetText} />
+      {readingPath && (
+        <ReadingPane path={readingPath} onClose={() => setReadingPath(null)} />
+      )}
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <ToastProvider>
+      <ChatPageInner />
+    </ToastProvider>
   );
 }
