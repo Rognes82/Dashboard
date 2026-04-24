@@ -136,3 +136,9 @@ CREATE INDEX IF NOT EXISTS idx_note_bins_bin ON note_bins(bin_id);
 CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_activity_timestamp ON activity(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_client_id ON activity(client_id);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated_at TEXT NOT NULL
+);
