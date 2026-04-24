@@ -44,6 +44,10 @@ export function createProfile(input: LlmProfileInput): LlmProfile {
     created_at: now,
   };
   writeAll([...readAll(), profile]);
+  // Auto-activate when no profile is currently active (first-profile UX).
+  if (!getSetting(ACTIVE_KEY)) {
+    setSetting(ACTIVE_KEY, profile.id);
+  }
   return profile;
 }
 
