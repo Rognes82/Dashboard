@@ -81,7 +81,7 @@ export default function SettingsPage() {
         <Card>
           <CardHeader label="Notion Sync Targets" right={<span className="text-2xs text-text-muted">{notionTargets.length}</span>} />
           <p className="text-[10px] text-text-muted mb-2">
-            Paste Notion database IDs (one per line). Each must be shared with your integration in Notion.
+            Paste Notion page IDs (one per line). Each page must be shared with your integration in Notion.
           </p>
           <textarea
             value={targetsInput}
