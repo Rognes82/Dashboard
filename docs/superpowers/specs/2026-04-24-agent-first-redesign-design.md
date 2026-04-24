@@ -239,6 +239,8 @@ Icon set (hand-drawn inline SVG, not a library):
 
 **Default route (`/bins` with no bin selected):** shows a note list of recently modified notes across all bins, plus a small prompt: `pick a bin from the sidebar`.
 
+**Routing:** Bins mode uses a dynamic route `app/bins/[id]/page.tsx` that renders the same browse component as `app/bins/page.tsx` but pre-selects the bin from the URL param. The sidebar's `selectedBin` state syncs from the URL on mount and updates the URL on clicks via Next's `router.push`. Direct URL navigation and internal clicks converge on the same state.
+
 ### 5.4 Review (`/review`)
 
 2×2 grid of cards:
@@ -270,7 +272,7 @@ Grid of 4 cards:
 **Actions**
 - Ghost buttons: "run vault indexer", "re-seed bins from folders", "run notion sync"
 - Each shows "Running… / Done ✓" inline status on click
-- "run notion sync" requires a new endpoint: `POST /api/actions/sync-notion` that spawns `tsx scripts/sync-notion.ts` with a 120s timeout (longer than other actions because Notion API is slower). Same pattern as existing `reindex` and `seed-bins` action routes.
+- "run notion sync" requires a new endpoint: `POST /api/actions/sync-notion` that spawns `tsx scripts/sync-notion.ts` with a 120s timeout (longer than other actions because Notion API is slower). Similar pattern to existing `reindex` and `seed-bins` action routes, but note that `scripts/sync-notion.ts` reads its configuration (`VAULT_PATH`, `NOTION_TOKEN`) from environment variables and takes no CLI arguments — so the spawn call passes env via `spawnSync` options rather than `--vault` args.
 
 **Sync Health**
 - Compact list in mono: `sync-name  ● Xm ago`
@@ -437,7 +439,7 @@ lib/llm/
 ### 7.5 Migration from existing env vars
 
 On first launch after v1.2 deploys:
-- If `ANTHROPIC_API_KEY` env var is set and no profiles exist: create a default `anthropic` profile with name `"Claude direct"`, `default_model: "claude-opus-4-7"`, `cache_enabled: true`. Mark it active.
+- If `ANTHROPIC_API_KEY` env var is set and no profiles exist: create a default `anthropic` profile with name `"Claude direct"`, `default_model: "claude-opus-4-7"`, `max_context_tokens: 200_000`. Mark it active.
 - `NOTION_TOKEN` is unchanged — stays as env (it's not an LLM provider).
 
 ### 7.6 Default model recommendations (help text in settings)
@@ -502,7 +504,7 @@ The following Phase 1 pages are **removed from primary navigation** but remain r
 | `/projects` | Same — URL still renders with retired banner. Projects data keeps syncing via `sync-projects.ts`. |
 | `/agents` | URL renders with retired banner. `sync-agents.ts` still runs. |
 | `/files` | URL renders with retired banner. |
-| `/notes` (list) | **Replaced.** The `app/notes/page.tsx` is rewritten to redirect to `/bins` via `<script>window.location.replace("/bins")</script>` or server-side redirect. |
+| `/notes` (list) | **Replaced.** The `app/notes/page.tsx` is rewritten as a server component that calls `redirect("/bins")` from `next/navigation`. No client-side flash. |
 | `/notes/[id]` | **Kept addressable.** Direct-link URLs still render the note detail view (for sharing, bookmarking), but internal clicks use the reading pane instead. |
 | Existing `/` dashboard home | **Replaced.** `app/page.tsx` now renders chat mode. |
 
@@ -568,7 +570,7 @@ v1.2 ships successfully when:
 3. Typing a question and pressing Enter streams a response back within 3 seconds of first token, with at least one citation link in typical queries
 4. Clicking a citation or note row opens the reading pane on the right without navigation
 5. Clicking a bin in the sidebar scopes the chat (badge appears) or navigates to bin view depending on current mode
-6. Settings page lets user add, switch, and delete provider profiles — all three provider types (Anthropic direct, OpenRouter, local) can be configured and tested from the UI
+6. Settings page lets user add, switch, and delete provider profiles — both provider types (Anthropic direct and OpenAI-compatible, including OpenRouter and local endpoints as sub-configurations) can be configured and tested from the UI
 7. The old `/clients`, `/projects`, `/agents`, `/files` nav items are gone but URLs still work if typed manually
 8. `/review` and `/settings` reflect the new visual language (palette, mono labels, cyan accents, ghost buttons)
 9. Full test suite remains green (new tests added for LLM abstraction, profile CRUD, retrieval assembly)
