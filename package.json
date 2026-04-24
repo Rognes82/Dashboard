@@ -18,7 +18,8 @@
     "sync:cron": "tsx scripts/sync-cron.ts",
     "sync:agents": "tsx scripts/sync-agents.ts",
     "sync:vault": "tsx scripts/vault-indexer.ts",
-    "sync:obsidian": "tsx scripts/sync-obsidian.ts"
+    "sync:obsidian": "tsx scripts/sync-obsidian.ts",
+    "sync:notion": "tsx scripts/sync-notion.ts"
   },
   "keywords": [],
   "author": "",
