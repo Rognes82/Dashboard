@@ -1,42 +1,52 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  content: [
-    "./app/**/*.{ts,tsx}",
-    "./components/**/*.{ts,tsx}",
-  ],
+  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        base: "#0a0a0a",
-        card: "#111111",
-        hover: "#1a1a1a",
-        border: "#222222",
-        "text-primary": "#f5f5f5",
-        "text-secondary": "#888888",
-        "text-muted": "#555555",
-        "accent-green": "#4ade80",
-        "accent-amber": "#facc15",
-        "accent-red": "#ef4444",
+        base: "#0d0d0d",
+        raised: "#0a0a0a",
+        sunken: "#111111",
+        hover: "#141414",
+        "border-subtle": "#1a1a1a",
+        "border-default": "#1f1f1f",
+        "border-strong": "#333333",
+        "text-primary": "#ede8d8",
+        "text-secondary": "#c9c6b7",
+        "text-tertiary": "#a09e96",
+        "text-muted": "#8e8c85",
+        "text-subtle": "#6e6c66",
+        "text-dim": "#4a4944",
+        accent: "#7dd3fc",
+        "accent-glow": "rgba(125, 211, 252, 0.06)",
+        "accent-tint": "rgba(125, 211, 252, 0.04)",
+        "accent-border": "rgba(125, 211, 252, 0.08)",
       },
       fontFamily: {
-        mono: ['"JetBrains Mono"', "monospace"],
-        sans: ['"IBM Plex Sans"', "sans-serif"],
+        sans: ['"Inter"', "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        mono: ['"JetBrains Mono"', "ui-monospace", "monospace"],
       },
       fontSize: {
         "2xs": "0.625rem",
         xs: "0.6875rem",
       },
       borderRadius: {
-        card: "6px",
-        badge: "4px",
+        sm: "4px",
+        md: "6px",
+        lg: "8px",
       },
-      transitionDuration: {
-        "200": "200ms",
+      keyframes: {
+        "caret-blink": {
+          "0%, 50%": { opacity: "1" },
+          "50.01%, 100%": { opacity: "0" },
+        },
+      },
+      animation: {
+        "caret-blink": "caret-blink 1s infinite",
       },
     },
   },
   plugins: [],
 };
-
 export default config;
