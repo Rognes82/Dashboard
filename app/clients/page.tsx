@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card } from "@/components/Card";
 import { StatusDot } from "@/components/StatusDot";
 import { Badge } from "@/components/Badge";
+import { RetiredBanner } from "@/components/RetiredBanner";
 import { listClients } from "@/lib/queries/clients";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ export default function ClientsListPage() {
 
   return (
     <div>
+      <RetiredBanner />
       <div className="mb-5">
         <h1 className="mono text-lg font-semibold text-text-primary">Clients</h1>
         <p className="text-xs text-text-muted mt-0.5">{clients.length} total</p>

@@ -1,6 +1,7 @@
 import { Card, CardHeader } from "@/components/Card";
 import { StatusDot } from "@/components/StatusDot";
 import { SyncHealth } from "@/components/SyncHealth";
+import { RetiredBanner } from "@/components/RetiredBanner";
 import { listAgents } from "@/lib/queries/agents";
 import { listSyncStatuses } from "@/lib/queries/sync-status";
 import { formatRelativeTime } from "@/lib/utils";
@@ -24,6 +25,7 @@ export default function AgentsSystemPage() {
 
   return (
     <div>
+      <RetiredBanner />
       <div className="mb-5">
         <h1 className="mono text-lg font-semibold text-text-primary">Agents &amp; System</h1>
         <p className="text-xs text-text-muted mt-0.5">Mac Mini · via Tailscale</p>

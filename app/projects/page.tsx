@@ -1,6 +1,7 @@
 import { Card, CardHeader } from "@/components/Card";
 import { StatusDot } from "@/components/StatusDot";
 import { ProjectClientSelect } from "@/components/ProjectClientSelect";
+import { RetiredBanner } from "@/components/RetiredBanner";
 import { listProjects } from "@/lib/queries/projects";
 import { listClients } from "@/lib/queries/clients";
 import { formatRelativeTime } from "@/lib/utils";
@@ -16,6 +17,7 @@ export default function ProjectsPage() {
 
   return (
     <div>
+      <RetiredBanner />
       <div className="mb-5">
         <h1 className="mono text-lg font-semibold text-text-primary">Projects</h1>
         <p className="text-xs text-text-muted mt-0.5">

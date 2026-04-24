@@ -1,5 +1,6 @@
 import { Card } from "@/components/Card";
 import { Badge } from "@/components/Badge";
+import { RetiredBanner } from "@/components/RetiredBanner";
 import { listFiles } from "@/lib/queries/files";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -10,6 +11,7 @@ export default function FilesPage() {
 
   return (
     <div>
+      <RetiredBanner />
       <div className="mb-5">
         <h1 className="mono text-lg font-semibold text-text-primary">Files</h1>
         <p className="text-xs text-text-muted mt-0.5">{files.length} files indexed</p>

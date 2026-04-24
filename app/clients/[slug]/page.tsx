@@ -3,6 +3,7 @@ import { Card, CardHeader } from "@/components/Card";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Badge } from "@/components/Badge";
 import { StatusDot } from "@/components/StatusDot";
+import { RetiredBanner } from "@/components/RetiredBanner";
 import { formatRelativeTime, activityBorderColor } from "@/lib/utils";
 import { getClientBySlug } from "@/lib/queries/clients";
 import { listProjectsByClient } from "@/lib/queries/projects";
@@ -30,6 +31,7 @@ export default function ClientHubPage({ params }: { params: { slug: string } }) 
 
   return (
     <div>
+      <RetiredBanner />
       <Breadcrumb items={[{ label: "Clients", href: "/clients" }, { label: client.name }]} />
 
       <div className="flex items-center justify-between mb-5">
