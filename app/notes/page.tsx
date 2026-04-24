@@ -48,7 +48,7 @@ export default function NotesPage() {
           <BinTree bins={bins} selectedBinId={selectedBinId} onSelect={setSelectedBinId} />
         </aside>
         <main className="bg-card border border-border rounded">
-          <NoteList notes={notes} emptyMessage={selectedBinId ? "No notes in this bin." : "No notes yet. Run Settings → Initial vault scan."} />
+          <NoteList notes={notes} onNoteClick={() => {}} emptyMessage={selectedBinId ? "No notes in this bin." : "No notes yet. Run Settings → Initial vault scan."} />
         </main>
       </div>
     </div>

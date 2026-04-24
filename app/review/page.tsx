@@ -43,17 +43,17 @@ export default function ReviewPage() {
         <div className="grid grid-cols-2 gap-3">
           <Card>
             <CardHeader label="Today" right={<span className="text-2xs text-text-muted">{data.today.length}</span>} />
-            <NoteList notes={data.today} emptyMessage="Nothing modified today." />
+            <NoteList notes={data.today} onNoteClick={() => {}} emptyMessage="Nothing modified today." />
           </Card>
 
           <Card>
             <CardHeader label="Uncategorized" right={<span className="text-2xs text-text-muted">{data.uncategorized.length}</span>} />
-            <NoteList notes={data.uncategorized} emptyMessage="All notes have a bin." />
+            <NoteList notes={data.uncategorized} onNoteClick={() => {}} emptyMessage="All notes have a bin." />
           </Card>
 
           <Card>
             <CardHeader label="Recent (7d)" right={<span className="text-2xs text-text-muted">{data.recent.length}</span>} />
-            <NoteList notes={data.recent} emptyMessage="No recent activity." />
+            <NoteList notes={data.recent} onNoteClick={() => {}} emptyMessage="No recent activity." />
           </Card>
 
           <Card>
