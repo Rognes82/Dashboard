@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS bins (
   parent_bin_id TEXT REFERENCES bins(id) ON DELETE CASCADE,
   source_seed TEXT UNIQUE,
   created_at TEXT NOT NULL,
-  sort_order INTEGER DEFAULT 0
+  sort_order REAL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS note_bins (

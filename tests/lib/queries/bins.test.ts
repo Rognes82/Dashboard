@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { resetDbForTesting, closeDb } from "../../../lib/db";
+import { resetDbForTesting, closeDb, getDb } from "../../../lib/db";
 import {
   createBin,
   getBinById,
@@ -132,5 +132,12 @@ describe("bins queries", () => {
     const a = getOrCreateBinBySeed({ source_seed: "obsidian:Content", name: "Content" });
     const b = getOrCreateBinBySeed({ source_seed: "obsidian:Content", name: "Content" });
     expect(a.id).toBe(b.id);
+  });
+
+  it("schema declares bins.sort_order as REAL for fractional drag-reorder", () => {
+    const db = getDb();
+    const cols = db.prepare("PRAGMA table_info(bins)").all() as Array<{ name: string; type: string }>;
+    const sortOrder = cols.find((c) => c.name === "sort_order");
+    expect(sortOrder?.type).toBe("REAL");
   });
 });
