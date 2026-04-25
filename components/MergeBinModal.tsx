@@ -73,13 +73,13 @@ export function MergeBinModal({
           <div>This will:</div>
           <ul className="list-disc list-inside space-y-1">
             <li>
-              Move {preview.direct_note_count} note{preview.direct_note_count === 1 ? "" : "s"} from "{sourceName}" to "{targetName}"
+              Move {preview.direct_note_count} note{preview.direct_note_count === 1 ? "" : "s"} from &quot;{sourceName}&quot; to &quot;{targetName}&quot;
             </li>
-            <li>Delete the empty "{sourceName}" bin</li>
+            <li>Delete the empty &quot;{sourceName}&quot; bin</li>
           </ul>
           {preview.direct_child_count > 0 && (
             <div className="pt-2 text-xs text-yellow-400">
-              ⚠ Sub-bins of "{sourceName}" ({preview.direct_child_count}) will be re-parented to "{targetName}".
+              ⚠ Sub-bins of &quot;{sourceName}&quot; ({preview.direct_child_count}) will be re-parented to &quot;{targetName}&quot;.
             </div>
           )}
           <div className="pt-2 text-xs text-text-tertiary">This cannot be undone.</div>
