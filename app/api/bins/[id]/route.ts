@@ -32,6 +32,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   const existing = getBinById(params.id);
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (existing.source_seed) {
+    return NextResponse.json({ error: "seeded bins cannot be deleted" }, { status: 403 });
+  }
   deleteBin(params.id);
   return NextResponse.json({ ok: true });
 }
