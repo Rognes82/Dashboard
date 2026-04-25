@@ -345,6 +345,7 @@ function DropStrip({
   lastNode: BinNode | null;
   onRefresh?: () => void;
 }) {
+  const { show } = useToast();
   const { hover, dropProps } = useDrop({
     accept: (payload) => payload.kind === "bin",
     onDrop: async (payload) => {
@@ -355,9 +356,14 @@ function DropStrip({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ sort_order: newSortOrder, parent_bin_id: parentId }),
         });
-        if (res.ok) onRefresh?.();
-      } catch {
-        /* error toast handled by re-parent path */
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          show(err.error ?? `Reorder failed (${res.status})`, "error");
+        } else {
+          onRefresh?.();
+        }
+      } catch (e) {
+        show(e instanceof Error ? e.message : "Reorder failed", "error");
       }
     },
   });
