@@ -16,7 +16,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   try {
     moveNoteBetweenBins(params.id, b.from_bin_id as string, b.to_bin_id as string);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "move failed";
+    const raw = err instanceof Error ? err.message : "";
+    // Whitelist known sentinel messages from moveNoteBetweenBins. Anything else
+    // (FK violation, SQLITE_BUSY, etc.) returns a generic message to avoid leaking server details.
+    const msg = raw === "note not in source bin" ? raw : "move failed";
     return NextResponse.json({ error: msg }, { status: 400 });
   }
   return NextResponse.json({ ok: true });
