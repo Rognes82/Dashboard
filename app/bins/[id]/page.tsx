@@ -43,6 +43,15 @@ export default function BinDetailPage({ params }: { params: { id: string } }) {
     });
   }, [params.id, refreshKey]);
 
+  // Refetch when sidebar reports a bin mutation (e.g., user dragged a note
+  // out of this view onto a sidebar bin). Without this, the moved note
+  // would still appear here until manual reload.
+  useEffect(() => {
+    function onMutated() { setRefreshKey((k) => k + 1); }
+    window.addEventListener("dashboard-bins-mutated", onMutated);
+    return () => window.removeEventListener("dashboard-bins-mutated", onMutated);
+  }, []);
+
   return (
     <div className="h-screen flex flex-col">
       <div className="px-6 py-4 border-b border-border-subtle">

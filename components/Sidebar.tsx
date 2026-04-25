@@ -122,7 +122,15 @@ export function Sidebar({
           selectedBinId={selectedBinId}
           onSelect={onSelectBin}
           filterQuery={filter}
-          onRefresh={() => setRefreshKey((k) => k + 1)}
+          onRefresh={() => {
+            setRefreshKey((k) => k + 1);
+            // Notify other surfaces (e.g., page-level NoteList) that a bin
+            // mutation happened — drag-to-sidebar moves a note out of the
+            // current view, but the page wouldn't know to refetch otherwise.
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("dashboard-bins-mutated"));
+            }
+          }}
           onRequestNewChild={(parent) => {
             setCreateParent({ id: parent.id, name: parent.name });
             setCreateOpen(true);
