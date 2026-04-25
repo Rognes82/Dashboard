@@ -29,10 +29,18 @@ export function DeleteBinModal({ open, binId, binName, onClose, onDeleted }: Del
     if (!open || !binId) return;
     setPreview(null);
     fetch(`/api/bins/${binId}/preview-delete`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`preview failed (${r.status})`);
+        return r.json();
+      })
       .then((d) => setPreview(d))
-      .catch(() => setPreview({ child_bin_count: 0, child_bin_names: [], has_more_children: false, note_count: 0 }));
-  }, [open, binId]);
+      .catch(() => {
+        // Don't fall back to a fake-empty preview — that would let the user
+        // click Delete on what looks like an empty bin when the API is down.
+        // Leave preview null (Delete stays disabled) and surface the error.
+        show("Couldn't load delete preview", "error");
+      });
+  }, [open, binId, show]);
 
   useEffect(() => {
     if (open) cancelRef.current?.focus();
