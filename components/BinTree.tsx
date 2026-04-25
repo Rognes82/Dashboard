@@ -134,9 +134,8 @@ function BinRow({
 
   // Drag-and-drop wiring (T23)
   const dragProps = useDrag({ kind: "bin", id: node.id });
-  // useIsCommandHeld kept for future modifier-aware behavior (e.g., copy vs move)
-  // but unused here — destructured to avoid unused-import lint.
-  useIsCommandHeld();
+  // Captured for ⌘-modifier disambiguation in the note-drop handler (T24).
+  const isCommandHeldRef = useIsCommandHeld();
 
   const { hover, dropProps } = useDrop({
     accept: (payload) => {
@@ -163,7 +162,48 @@ function BinRow({
           show(e instanceof Error ? e.message : "Re-parent failed", "error");
         }
       } else if (payload.kind === "note") {
-        // Note drop handling — wired in T24. For now, no-op.
+        const isCmd = isCommandHeldRef.current;
+        const sourceUnambiguous = !!payload.contextBinId;
+        if (isCmd && sourceUnambiguous) {
+          // Move
+          try {
+            const res = await fetch(`/api/notes/${payload.id}/move`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ from_bin_id: payload.contextBinId, to_bin_id: node.id }),
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              show(err.error ?? `Move failed (${res.status})`, "error");
+            } else {
+              show(`Moved to '${node.name}'`, "info");
+              onRefresh?.();
+            }
+          } catch (e) {
+            show(e instanceof Error ? e.message : "Move failed", "error");
+          }
+        } else {
+          if (isCmd && !sourceUnambiguous) {
+            show("Hold ⌘ to move only when a single source bin is clear", "warn");
+          }
+          // Add (default + ambiguous-source fallback)
+          try {
+            const res = await fetch(`/api/bins/${node.id}/assign`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ note_id: payload.id }),
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              show(err.error ?? `Add failed (${res.status})`, "error");
+            } else {
+              show(`Added to '${node.name}'`, "info");
+              onRefresh?.();
+            }
+          } catch (e) {
+            show(e instanceof Error ? e.message : "Add failed", "error");
+          }
+        }
       }
     },
   });

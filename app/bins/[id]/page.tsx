@@ -28,6 +28,7 @@ export default function BinDetailPage({ params }: { params: { id: string } }) {
   const [path, setPath] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [reading, setReading] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -40,7 +41,7 @@ export default function BinDetailPage({ params }: { params: { id: string } }) {
       if (p) setPath(p);
       setLoading(false);
     });
-  }, [params.id]);
+  }, [params.id, refreshKey]);
 
   return (
     <div className="h-screen flex flex-col">
@@ -62,6 +63,8 @@ export default function BinDetailPage({ params }: { params: { id: string } }) {
             onNoteClick={(n) => setReading(n.vault_path)}
             selectedPath={reading}
             emptyMessage="No notes in this bin yet."
+            currentBinId={params.id}
+            onMutated={() => setRefreshKey((k) => k + 1)}
           />
         )}
       </div>

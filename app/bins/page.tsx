@@ -9,6 +9,7 @@ export default function BinsDefaultPage() {
   const [notes, setNotes] = useState<VaultNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [reading, setReading] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -16,7 +17,7 @@ export default function BinsDefaultPage() {
       .then((r) => r.json())
       .then((d) => setNotes(d.notes ?? []))
       .finally(() => setLoading(false));
-  }, []);
+  }, [refreshKey]);
 
   return (
     <div className="h-screen flex flex-col">
@@ -34,6 +35,8 @@ export default function BinsDefaultPage() {
             onNoteClick={(n) => setReading(n.vault_path)}
             selectedPath={reading}
             emptyMessage="No notes yet."
+            currentBinId={null}
+            onMutated={() => setRefreshKey((k) => k + 1)}
           />
         )}
       </div>
