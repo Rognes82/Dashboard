@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { BinNode, SyncStatusRecord } from "@/lib/types";
 import { BinTree } from "./BinTree";
-import { ChatIcon, BinsIcon, ReviewIcon, SettingsIcon, SearchIcon } from "./icons";
+import { CreateBinModal } from "./CreateBinModal";
+import { ChatIcon, BinsIcon, ReviewIcon, SettingsIcon, SearchIcon, PlusIcon } from "./icons";
 
 interface NavItem {
   href: string;
@@ -31,11 +32,17 @@ export function Sidebar({
   const [bins, setBins] = useState<BinNode[]>([]);
   const [filter, setFilter] = useState("");
   const [sync, setSync] = useState<SyncStatusRecord[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createParent, setCreateParent] = useState<{ id: string | null; name?: string }>({ id: null });
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     fetch("/api/bins")
       .then((r) => r.json())
       .then((d) => setBins(d.bins ?? []));
+  }, [refreshKey]);
+
+  useEffect(() => {
     fetch("/api/system")
       .then((r) => r.json())
       .then((d) => setSync(d.sync ?? []));
@@ -71,8 +78,8 @@ export function Sidebar({
         ))}
       </div>
 
-      <div className="px-2 pt-2 pb-1">
-        <label className="relative block">
+      <div className="px-2 pt-2 pb-1 flex items-center gap-1.5">
+        <label className="relative block flex-1">
           <span className="sr-only">search bins</span>
           <span className="absolute left-2 top-1/2 -translate-y-1/2 text-text-subtle">
             <SearchIcon size={10} />
@@ -85,6 +92,17 @@ export function Sidebar({
             className="w-full bg-hover border border-border-default rounded-sm pl-6 pr-2 py-1 text-2xs text-text-primary placeholder:text-text-subtle mono focus:border-accent focus:outline-none"
           />
         </label>
+        <button
+          onClick={() => {
+            setCreateParent({ id: null });
+            setCreateOpen(true);
+          }}
+          title="New bin"
+          aria-label="New bin"
+          className="p-1 rounded text-text-muted hover:text-text-primary"
+        >
+          <PlusIcon size={12} />
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-2">
@@ -107,6 +125,17 @@ export function Sidebar({
             : "no sync yet"}
         </span>
       </div>
+
+      <CreateBinModal
+        open={createOpen}
+        parentBinId={createParent.id}
+        parentBinName={createParent.name ?? null}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(newId) => {
+          setRefreshKey((k) => k + 1);
+          onSelectBin(newId);
+        }}
+      />
     </aside>
   );
 }
