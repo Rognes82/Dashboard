@@ -13,8 +13,10 @@ import {
   mergeBin,
   getOrCreateBinBySeed,
   isDescendantOf,
+  moveNoteBetweenBins,
 } from "../../../lib/queries/bins";
 import { upsertVaultNote } from "../../../lib/queries/vault-notes";
+import { nowIso } from "../../../lib/utils";
 import fs from "fs";
 import path from "path";
 
@@ -168,6 +170,33 @@ describe("bins queries", () => {
       const a = createBin({ name: "A" });
       const b = createBin({ name: "B" });
       expect(isDescendantOf(a.id, b.id)).toBe(false);
+    });
+  });
+
+  describe("moveNoteBetweenBins", () => {
+    it("moves a note from source to target atomically", () => {
+      const noteRow = upsertVaultNote({
+        vault_path: "test/note1.md", source: "obsidian",
+        source_id: null, source_url: null,
+        title: "T", content_hash: "h", modified_at: nowIso(),
+      });
+      const a = createBin({ name: "A" });
+      const b = createBin({ name: "B" });
+      assignNoteToBin({ note_id: noteRow.id, bin_id: a.id, assigned_by: "manual" });
+      moveNoteBetweenBins(noteRow.id, a.id, b.id);
+      const bins = listBinsForNote(noteRow.id).map((x) => x.id);
+      expect(bins).toEqual([b.id]);
+    });
+
+    it("throws if note is not in source bin", () => {
+      const noteRow = upsertVaultNote({
+        vault_path: "test/note2.md", source: "obsidian",
+        source_id: null, source_url: null,
+        title: "T", content_hash: "h", modified_at: nowIso(),
+      });
+      const a = createBin({ name: "A" });
+      const b = createBin({ name: "B" });
+      expect(() => moveNoteBetweenBins(noteRow.id, a.id, b.id)).toThrow(/not in source bin/);
     });
   });
 });

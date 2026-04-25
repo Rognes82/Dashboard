@@ -160,3 +160,28 @@ export function isDescendantOf(maybeChild: string, ancestor: string): boolean {
     .get(ancestor, maybeChild);
   return !!rows;
 }
+
+/**
+ * Atomically moves a note from one bin to another in a single transaction.
+ * Throws if the note is not in the source bin.
+ */
+export function moveNoteBetweenBins(
+  noteId: string,
+  fromBinId: string,
+  toBinId: string
+): void {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const inSource = db
+      .prepare("SELECT 1 FROM note_bins WHERE note_id = ? AND bin_id = ? LIMIT 1")
+      .get(noteId, fromBinId);
+    if (!inSource) throw new Error("note not in source bin");
+    db.prepare("DELETE FROM note_bins WHERE note_id = ? AND bin_id = ?").run(noteId, fromBinId);
+    db.prepare(
+      `INSERT INTO note_bins (note_id, bin_id, assigned_at, assigned_by)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(note_id, bin_id) DO NOTHING`
+    ).run(noteId, toBinId, nowIso(), "manual");
+  });
+  tx();
+}
