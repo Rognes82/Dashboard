@@ -199,4 +199,31 @@ describe("bins queries", () => {
       expect(() => moveNoteBetweenBins(noteRow.id, a.id, b.id)).toThrow(/not in source bin/);
     });
   });
+
+  describe("mergeBin re-parents children", () => {
+    it("preserves source's children by re-parenting them to target", () => {
+      const source = createBin({ name: "Drafts" });
+      const target = createBin({ name: "Notes" });
+      const child1 = createBin({ name: "WIP", parent_bin_id: source.id });
+      const child2 = createBin({ name: "Old", parent_bin_id: source.id });
+      mergeBin(source.id, target.id);
+      expect(getBinById(source.id)).toBeNull();
+      expect(getBinById(child1.id)?.parent_bin_id).toBe(target.id);
+      expect(getBinById(child2.id)?.parent_bin_id).toBe(target.id);
+    });
+    it("still merges note assignments idempotently", () => {
+      const noteRow = upsertVaultNote({
+        vault_path: "test/note-merge.md", source: "obsidian",
+        source_id: null, source_url: null,
+        title: "T", content_hash: "h", modified_at: nowIso(),
+      });
+      const source = createBin({ name: "S" });
+      const target = createBin({ name: "T" });
+      assignNoteToBin({ note_id: noteRow.id, bin_id: source.id, assigned_by: "manual" });
+      assignNoteToBin({ note_id: noteRow.id, bin_id: target.id, assigned_by: "manual" });
+      mergeBin(source.id, target.id);
+      const bins = listBinsForNote(noteRow.id).map((x) => x.id);
+      expect(bins).toEqual([target.id]);
+    });
+  });
 });

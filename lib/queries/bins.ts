@@ -137,6 +137,9 @@ export function mergeBin(source_id: string, target_id: string): void {
        ON CONFLICT(note_id, bin_id) DO NOTHING`
     ).run(target_id, source_id);
     db.prepare("DELETE FROM note_bins WHERE bin_id = ?").run(source_id);
+    // Re-parent source's direct children to target before delete.
+    // Without this, the FK ON DELETE CASCADE would destroy them.
+    db.prepare("UPDATE bins SET parent_bin_id = ? WHERE parent_bin_id = ?").run(target_id, source_id);
     db.prepare("DELETE FROM bins WHERE id = ?").run(source_id);
   });
   tx();
