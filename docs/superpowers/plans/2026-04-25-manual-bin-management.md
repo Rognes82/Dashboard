@@ -88,22 +88,30 @@
 
 - [ ] **Step 1: Write the failing test**
 
+SQLite uses dynamic typing — INTEGER affinity columns will store `1500.5` without truncating (only TEXT→numeric coercion is strict). So a value-roundtrip test would pass under both INTEGER and REAL. Instead, assert the **declared schema type** via `PRAGMA table_info`, which is the actual contract we care about.
+
 Add this test inside the existing `describe("bins queries", () => {...})` block in `tests/lib/queries/bins.test.ts`:
 
 ```ts
-it("sort_order accepts and round-trips fractional values", () => {
-  const a = createBin({ name: "A", sort_order: 1500.5 });
-  const b = createBin({ name: "B", sort_order: 750.25 });
-  expect(getBinById(a.id)?.sort_order).toBe(1500.5);
-  expect(getBinById(b.id)?.sort_order).toBe(750.25);
+it("schema declares bins.sort_order as REAL for fractional drag-reorder", () => {
+  const db = getDb();
+  const cols = db.prepare("PRAGMA table_info(bins)").all() as Array<{ name: string; type: string }>;
+  const sortOrder = cols.find((c) => c.name === "sort_order");
+  expect(sortOrder?.type).toBe("REAL");
 });
+```
+
+Add `getDb` to imports in the test file:
+
+```ts
+import { getDb } from "../../../lib/db";
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run tests/lib/queries/bins.test.ts -t "fractional values"`
+Run: `npx vitest run tests/lib/queries/bins.test.ts -t "REAL for fractional"`
 
-Expected: FAIL — values truncate to `1500` and `750` because the column is INTEGER.
+Expected: FAIL — column type is currently `INTEGER`. Test message will show `expected "INTEGER" to be "REAL"`.
 
 - [ ] **Step 3: Edit `lib/schema.sql` line 73**
 
@@ -118,9 +126,9 @@ to:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run tests/lib/queries/bins.test.ts -t "fractional values"`
+Run: `npx vitest run tests/lib/queries/bins.test.ts -t "REAL for fractional"`
 
-Expected: PASS — REAL preserves the decimals.
+Expected: PASS — schema declares REAL.
 
 - [ ] **Step 5: Run the full suite to confirm no regressions**
 
@@ -250,7 +258,8 @@ describe("moveNoteBetweenBins", () => {
   it("moves a note from source to target atomically", () => {
     const noteRow = upsertVaultNote({
       vault_path: "test/note1.md", source: "obsidian",
-      title: "T", body_plain: "x", body_hash: "h", mtime: nowIso(), word_count: 1, last_indexed_at: nowIso(),
+      source_id: null, source_url: null,
+      title: "T", content_hash: "h", modified_at: nowIso(),
     });
     const a = createBin({ name: "A" });
     const b = createBin({ name: "B" });
@@ -263,7 +272,8 @@ describe("moveNoteBetweenBins", () => {
   it("throws if note is not in source bin", () => {
     const noteRow = upsertVaultNote({
       vault_path: "test/note2.md", source: "obsidian",
-      title: "T", body_plain: "x", body_hash: "h", mtime: nowIso(), word_count: 1, last_indexed_at: nowIso(),
+      source_id: null, source_url: null,
+      title: "T", content_hash: "h", modified_at: nowIso(),
     });
     const a = createBin({ name: "A" });
     const b = createBin({ name: "B" });
@@ -364,7 +374,8 @@ describe("mergeBin re-parents children", () => {
   it("still merges note assignments idempotently", () => {
     const noteRow = upsertVaultNote({
       vault_path: "test/note-merge.md", source: "obsidian",
-      title: "T", body_plain: "x", body_hash: "h", mtime: nowIso(), word_count: 1, last_indexed_at: nowIso(),
+      source_id: null, source_url: null,
+      title: "T", content_hash: "h", modified_at: nowIso(),
     });
     const source = createBin({ name: "S" });
     const target = createBin({ name: "T" });
@@ -465,7 +476,8 @@ describe("getBinDeletePreview", () => {
   it("counts distinct notes once even if assigned to multiple descendants", () => {
     const noteRow = upsertVaultNote({
       vault_path: "test/dist.md", source: "obsidian",
-      title: "T", body_plain: "x", body_hash: "h", mtime: nowIso(), word_count: 1, last_indexed_at: nowIso(),
+      source_id: null, source_url: null,
+      title: "T", content_hash: "h", modified_at: nowIso(),
     });
     const root = createBin({ name: "Root" });
     const a = createBin({ name: "A", parent_bin_id: root.id });
@@ -573,7 +585,8 @@ describe("getBinMergePreview", () => {
   it("counts only direct children and direct note assignments", () => {
     const noteRow = upsertVaultNote({
       vault_path: "test/merge-pv.md", source: "obsidian",
-      title: "T", body_plain: "x", body_hash: "h", mtime: nowIso(), word_count: 1, last_indexed_at: nowIso(),
+      source_id: null, source_url: null,
+      title: "T", content_hash: "h", modified_at: nowIso(),
     });
     const root = createBin({ name: "Root" });
     const directChild = createBin({ name: "Direct", parent_bin_id: root.id });
@@ -683,7 +696,8 @@ describe("POST /api/notes/[id]/move", () => {
   it("moves a note from source bin to target bin (200)", async () => {
     const note = upsertVaultNote({
       vault_path: "x.md", source: "obsidian",
-      title: "T", body_plain: "x", body_hash: "h", mtime: nowIso(), word_count: 1, last_indexed_at: nowIso(),
+      source_id: null, source_url: null,
+      title: "T", content_hash: "h", modified_at: nowIso(),
     });
     const a = createBin({ name: "A" });
     const b = createBin({ name: "B" });
@@ -698,7 +712,8 @@ describe("POST /api/notes/[id]/move", () => {
   it("returns 400 if note is not in source bin", async () => {
     const note = upsertVaultNote({
       vault_path: "y.md", source: "obsidian",
-      title: "T", body_plain: "x", body_hash: "h", mtime: nowIso(), word_count: 1, last_indexed_at: nowIso(),
+      source_id: null, source_url: null,
+      title: "T", content_hash: "h", modified_at: nowIso(),
     });
     const a = createBin({ name: "A" });
     const b = createBin({ name: "B" });
@@ -710,7 +725,8 @@ describe("POST /api/notes/[id]/move", () => {
   it("returns 404 if a bin is missing", async () => {
     const note = upsertVaultNote({
       vault_path: "z.md", source: "obsidian",
-      title: "T", body_plain: "x", body_hash: "h", mtime: nowIso(), word_count: 1, last_indexed_at: nowIso(),
+      source_id: null, source_url: null,
+      title: "T", content_hash: "h", modified_at: nowIso(),
     });
     const a = createBin({ name: "A" });
     assignNoteToBin({ note_id: note.id, bin_id: a.id, assigned_by: "manual" });
@@ -902,7 +918,8 @@ describe("GET /api/bins/[id]/preview-merge", () => {
     createBin({ name: "Grand", parent_bin_id: child.id });
     const note = upsertVaultNote({
       vault_path: "p.md", source: "obsidian",
-      title: "T", body_plain: "x", body_hash: "h", mtime: nowIso(), word_count: 1, last_indexed_at: nowIso(),
+      source_id: null, source_url: null,
+      title: "T", content_hash: "h", modified_at: nowIso(),
     });
     assignNoteToBin({ note_id: note.id, bin_id: root.id, assigned_by: "manual" });
     const res = await GET(new Request("http://x"), { params: { id: root.id } });
@@ -1274,7 +1291,7 @@ export function Modal({ open, onClose, title, size = "md", children }: ModalProp
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative w-full ${sizeClasses[size]} bg-raised border border-border rounded-lg shadow-xl p-5`}
+        className={`relative w-full ${sizeClasses[size]} bg-raised border border-border-default rounded-lg shadow-xl p-5`}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id={titleId} className="font-mono uppercase tracking-wide text-xs text-text-secondary mb-3">
@@ -1387,7 +1404,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
     <div
       ref={menuRef}
       style={{ left: clampX(state.x), top: clampY(state.y) }}
-      className="fixed z-[80] min-w-[160px] bg-raised border border-border rounded-md shadow-xl py-1"
+      className="fixed z-[80] min-w-[160px] bg-raised border border-border-default rounded-md shadow-xl py-1"
     >
       {state.items.map((item, i) => (
         <button
@@ -1620,7 +1637,7 @@ export function CreateBinModal({ open, parentBinId, parentBinName, onClose, onCr
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && valid) handleSubmit(); }}
         placeholder="Bin name"
-        className="w-full px-3 py-2 bg-base border border-border rounded text-text-primary outline-none focus:border-accent"
+        className="w-full px-3 py-2 bg-base border border-border-default rounded text-text-primary outline-none focus:border-accent"
       />
       {tooLong && (
         <div className="mt-2 text-xs text-red-400">Too long — max 120 characters</div>
@@ -1730,9 +1747,9 @@ export function BinPicker({
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
         placeholder="Filter bins…"
-        className="w-full px-3 py-2 bg-base border border-border rounded text-text-primary outline-none focus:border-accent"
+        className="w-full px-3 py-2 bg-base border border-border-default rounded text-text-primary outline-none focus:border-accent"
       />
-      <div className="mt-3 max-h-72 overflow-auto border border-border rounded p-2">
+      <div className="mt-3 max-h-72 overflow-auto border border-border-default rounded p-2">
         {showTopLevelOption && (
           <button
             onClick={() => setSelected(null)}
@@ -2189,6 +2206,15 @@ interface UseDropOptions {
   onDrop(payload: DragPayload, e: ReactDragEvent): void;
 }
 
+// HTML5 drag-and-drop limitation: dataTransfer.getData() returns "" during dragover
+// and dragenter in most browsers (data is only readable on the actual drop event).
+// Our useDrop accept() runs against the cached payload when available; when not,
+// the hover indicator falls back to "valid" and the actual validation happens
+// at drop time (server returns 400 if invalid → toast surfaces error).
+// This means visual indicators for invalid drops (e.g., dragging a parent onto
+// its own child) may show cyan instead of red dashed during hover. Not a blocker
+// for v1.2.1 — server-side cycle validation (Task 11) catches it on drop.
+
 /**
  * Returns props + state for a drop target. State indicates whether a valid drag is hovering it.
  */
@@ -2298,7 +2324,7 @@ export function DragModifierHint() {
 
   if (!dragging) return null;
   return (
-    <div className="fixed bottom-4 right-4 z-[75] font-mono text-xs px-2 py-1 bg-raised border border-border rounded-md text-text-secondary pointer-events-none">
+    <div className="fixed bottom-4 right-4 z-[75] font-mono text-xs px-2 py-1 bg-raised border border-border-default rounded-md text-text-secondary pointer-events-none">
       {cmd ? "Move (⌘)" : "Add"}
     </div>
   );
@@ -2371,7 +2397,7 @@ Modify the search input row — wrap it so the input is on the left and the `+` 
     value={filter}
     onChange={(e) => setFilter(e.target.value)}
     placeholder="Filter bins…"
-    className="flex-1 px-2 py-1 text-xs bg-base border border-border rounded text-text-primary outline-none focus:border-accent"
+    className="flex-1 px-2 py-1 text-xs bg-base border border-border-default rounded text-text-primary outline-none focus:border-accent"
   />
   <button
     onClick={() => { setCreateParent({ id: null }); setCreateOpen(true); }}
@@ -2535,7 +2561,7 @@ Replace the `<span>{node.name}</span>` (or equivalent name span) with:
       else if (e.key === "Enter") commitRename();
     }}
     onBlur={commitRename}
-    className="bg-base border border-border rounded px-1 text-xs font-mono uppercase tracking-wide text-text-primary outline-none focus:border-accent"
+    className="bg-base border border-border-default rounded px-1 text-xs font-mono uppercase tracking-wide text-text-primary outline-none focus:border-accent"
   />
 ) : (
   <span className="font-mono uppercase tracking-wide text-xs">{node.name}</span>
@@ -2806,10 +2832,15 @@ function DropStrip({
       } catch { /* error toast handled by re-parent path; reorder rarely fails */ }
     },
   });
+  // Use <li role="presentation"> rather than <div> so we stay HTML-valid
+  // when rendered inside the parent <ul>. aria-hidden because it's a UI-only
+  // affordance, not navigable content.
   return (
-    <div
+    <li
+      role="presentation"
+      aria-hidden="true"
       {...dropProps}
-      className={`h-1 -my-0.5 ${hover === "valid" ? "bg-accent" : "bg-transparent"}`}
+      className={`h-1 -my-0.5 list-none ${hover === "valid" ? "bg-accent" : "bg-transparent"}`}
     />
   );
 }
@@ -3029,27 +3060,48 @@ Below the list, render the BinPicker for add/move:
 )}
 ```
 
-- [ ] **Step 3: Pass `noteBins` and `currentBinId` from page contexts**
+- [ ] **Step 3: Pass `currentBinId` and a refetch callback from page contexts**
 
-In `app/bins/[id]/page.tsx`, fetch each note's bin list and pass `currentBinId`:
+In `app/bins/[id]/page.tsx`, add a `refreshKey` state and pass it to NoteList. Find the existing `useEffect` that fetches notes; add `refreshKey` to its dependency array. Then in JSX:
 
 ```tsx
-// pseudo: build noteBins map by fetching /api/notes/[id] for each, OR
-// extend the GET /api/notes endpoint to include bins. For Now, simplest: pass
-// just currentBinId and skip the multi-bin badge for /bins/[id] (notes there are
-// known to be in this bin).
+const [refreshKey, setRefreshKey] = useState(0);
+
+// existing useEffect, with refreshKey added:
+useEffect(() => {
+  fetch(`/api/notes?bin=${params.id}`).then((r) => r.json()).then((d) => setNotes(d.notes ?? []));
+}, [params.id, refreshKey]);
+
+// in JSX where <NoteList /> is rendered:
 <NoteList
   notes={notes}
-  onNoteClick={…}
-  selectedPath={selectedPath}
+  onNoteClick={(note) => setSelected(note)}
+  selectedPath={selected?.vault_path ?? null}
   currentBinId={params.id}
-  onMutated={() => /* refetch */}
+  onMutated={() => setRefreshKey((k) => k + 1)}
 />
 ```
 
-In `app/bins/page.tsx` (Recent view), `currentBinId={null}` and skip noteBins for now.
+In `app/bins/page.tsx` (Recent view), apply the same pattern:
 
-(Note: full multi-bin badge support requires extending `GET /api/notes` to include `bins[]` per note. If that endpoint doesn't already include it, leave noteBins undefined — the badge simply won't show. That's an acceptable v1.2.1 simplification; explicit follow-up if needed.)
+```tsx
+const [refreshKey, setRefreshKey] = useState(0);
+
+useEffect(() => {
+  fetch("/api/notes?limit=100").then((r) => r.json()).then((d) => setNotes(d.notes ?? []));
+}, [refreshKey]);
+
+// in JSX:
+<NoteList
+  notes={notes}
+  onNoteClick={(note) => setSelected(note)}
+  selectedPath={selected?.vault_path ?? null}
+  currentBinId={null}
+  onMutated={() => setRefreshKey((k) => k + 1)}
+/>
+```
+
+`noteBins` prop stays undefined for v1.2.1 — the multi-bin badge requires extending `GET /api/notes` to include `bins[]` per note. That's a deliberate scope deferral (per spec §5.2): the badge will simply not show. Follow-up: add a `bins` field to the notes-list response in a future task.
 
 - [ ] **Step 4: Update BinTree note-drop handler**
 
