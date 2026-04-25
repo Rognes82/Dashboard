@@ -88,3 +88,5 @@ export const SendIcon = makeIcon(
   "Send",
   <path d="M4 20l16-8L4 4v6l8 2-8 2z" />
 );
+
+export const PlusIcon = makeIcon("Plus", <path d="M12 5v14M5 12h14" />);
