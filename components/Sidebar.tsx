@@ -6,6 +6,10 @@ import { useEffect, useState } from "react";
 import type { BinNode, SyncStatusRecord } from "@/lib/types";
 import { BinTree } from "./BinTree";
 import { CreateBinModal } from "./CreateBinModal";
+import { BinPicker } from "./BinPicker";
+import { DeleteBinModal } from "./DeleteBinModal";
+import { MergeBinModal } from "./MergeBinModal";
+import { useToast } from "./chat/ToastProvider";
 import { ChatIcon, BinsIcon, ReviewIcon, SettingsIcon, SearchIcon, PlusIcon } from "./icons";
 
 interface NavItem {
@@ -29,12 +33,19 @@ export function Sidebar({
   onSelectBin: (id: string | null) => void;
 }) {
   const pathname = usePathname();
+  const toast = useToast();
   const [bins, setBins] = useState<BinNode[]>([]);
   const [filter, setFilter] = useState("");
   const [sync, setSync] = useState<SyncStatusRecord[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [createParent, setCreateParent] = useState<{ id: string | null; name?: string }>({ id: null });
   const [refreshKey, setRefreshKey] = useState(0);
+  const [moveBin, setMoveBin] = useState<BinNode | null>(null);
+  const [mergeBinSource, setMergeBinSource] = useState<BinNode | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState<string | null>(null);
+  const [mergeTargetName, setMergeTargetName] = useState<string>("");
+  const [mergePickerOpen, setMergePickerOpen] = useState(false);
+  const [deleteBin, setDeleteBin] = useState<BinNode | null>(null);
 
   useEffect(() => {
     fetch("/api/bins")
@@ -111,6 +122,17 @@ export function Sidebar({
           selectedBinId={selectedBinId}
           onSelect={onSelectBin}
           filterQuery={filter}
+          onRefresh={() => setRefreshKey((k) => k + 1)}
+          onRequestNewChild={(parent) => {
+            setCreateParent({ id: parent.id, name: parent.name });
+            setCreateOpen(true);
+          }}
+          onRequestMoveBin={(bin) => setMoveBin(bin)}
+          onRequestMerge={(bin) => {
+            setMergeBinSource(bin);
+            setMergePickerOpen(true);
+          }}
+          onRequestDelete={(bin) => setDeleteBin(bin)}
         />
       </div>
 
@@ -137,6 +159,81 @@ export function Sidebar({
           onSelectBin(newId);
         }}
       />
+
+      {moveBin && (
+        <BinPicker
+          open={!!moveBin}
+          onClose={() => setMoveBin(null)}
+          title={`Move "${moveBin.name}" to…`}
+          excludeIds={[moveBin.id]}
+          showTopLevelOption
+          onPick={async (targetId) => {
+            try {
+              const res = await fetch(`/api/bins/${moveBin.id}`, {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ parent_bin_id: targetId }),
+              });
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error ?? `Move failed (${res.status})`);
+              }
+              toast.show(`Moved '${moveBin.name}'`, "info");
+              setRefreshKey((k) => k + 1);
+            } catch (e) {
+              toast.show(e instanceof Error ? e.message : "Move failed", "error");
+            }
+          }}
+        />
+      )}
+
+      {mergeBinSource && (
+        <BinPicker
+          open={mergePickerOpen}
+          onClose={() => {
+            setMergePickerOpen(false);
+            setMergeBinSource(null);
+          }}
+          title={`Merge "${mergeBinSource.name}" into…`}
+          excludeIds={[mergeBinSource.id]}
+          onPick={(targetId) => {
+            if (!targetId) return;
+            const target = findBinInTree(bins, targetId);
+            setMergeTargetId(targetId);
+            setMergeTargetName(target?.name ?? "?");
+            setMergePickerOpen(false);
+          }}
+        />
+      )}
+
+      {mergeBinSource && mergeTargetId && (
+        <MergeBinModal
+          open={!!mergeTargetId}
+          sourceId={mergeBinSource.id}
+          sourceName={mergeBinSource.name}
+          targetId={mergeTargetId}
+          targetName={mergeTargetName}
+          onClose={() => {
+            setMergeTargetId(null);
+            setMergeBinSource(null);
+          }}
+          onMerged={(targetId) => {
+            onSelectBin(targetId);
+            setRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
+
+      <DeleteBinModal
+        open={!!deleteBin}
+        binId={deleteBin?.id ?? null}
+        binName={deleteBin?.name ?? ""}
+        onClose={() => setDeleteBin(null)}
+        onDeleted={() => {
+          if (deleteBin && selectedBinId === deleteBin.id) onSelectBin(null);
+          setRefreshKey((k) => k + 1);
+        }}
+      />
     </aside>
   );
 }
@@ -149,4 +246,13 @@ function relTime(iso: string): string {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
+}
+
+function findBinInTree(bins: BinNode[], id: string): BinNode | null {
+  for (const b of bins) {
+    if (b.id === id) return b;
+    const c = b.children ? findBinInTree(b.children, id) : null;
+    if (c) return c;
+  }
+  return null;
 }
