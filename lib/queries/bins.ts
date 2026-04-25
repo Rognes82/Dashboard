@@ -141,3 +141,22 @@ export function mergeBin(source_id: string, target_id: string): void {
   });
   tx();
 }
+
+/**
+ * Returns true if `maybeChild` is a descendant of `ancestor` in the bin tree.
+ * Returns false for self, siblings, and unrelated bins.
+ */
+export function isDescendantOf(maybeChild: string, ancestor: string): boolean {
+  if (maybeChild === ancestor) return false;
+  const rows = getDb()
+    .prepare(
+      `WITH RECURSIVE descendants(id) AS (
+         SELECT id FROM bins WHERE parent_bin_id = ?
+         UNION ALL
+         SELECT b.id FROM bins b JOIN descendants d ON b.parent_bin_id = d.id
+       )
+       SELECT 1 FROM descendants WHERE id = ? LIMIT 1`
+    )
+    .get(ancestor, maybeChild);
+  return !!rows;
+}

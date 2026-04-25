@@ -12,6 +12,7 @@ import {
   listBinsForNote,
   mergeBin,
   getOrCreateBinBySeed,
+  isDescendantOf,
 } from "../../../lib/queries/bins";
 import { upsertVaultNote } from "../../../lib/queries/vault-notes";
 import fs from "fs";
@@ -139,5 +140,34 @@ describe("bins queries", () => {
     const cols = db.prepare("PRAGMA table_info(bins)").all() as Array<{ name: string; type: string }>;
     const sortOrder = cols.find((c) => c.name === "sort_order");
     expect(sortOrder?.type).toBe("REAL");
+  });
+
+  describe("isDescendantOf", () => {
+    it("returns true for direct child", () => {
+      const parent = createBin({ name: "P" });
+      const child = createBin({ name: "C", parent_bin_id: parent.id });
+      expect(isDescendantOf(child.id, parent.id)).toBe(true);
+    });
+    it("returns true for grandchild", () => {
+      const a = createBin({ name: "A" });
+      const b = createBin({ name: "B", parent_bin_id: a.id });
+      const c = createBin({ name: "C", parent_bin_id: b.id });
+      expect(isDescendantOf(c.id, a.id)).toBe(true);
+    });
+    it("returns false for sibling", () => {
+      const parent = createBin({ name: "P" });
+      const a = createBin({ name: "A", parent_bin_id: parent.id });
+      const b = createBin({ name: "B", parent_bin_id: parent.id });
+      expect(isDescendantOf(a.id, b.id)).toBe(false);
+    });
+    it("returns false for self", () => {
+      const a = createBin({ name: "A" });
+      expect(isDescendantOf(a.id, a.id)).toBe(false);
+    });
+    it("returns false for unrelated bins", () => {
+      const a = createBin({ name: "A" });
+      const b = createBin({ name: "B" });
+      expect(isDescendantOf(a.id, b.id)).toBe(false);
+    });
   });
 });
