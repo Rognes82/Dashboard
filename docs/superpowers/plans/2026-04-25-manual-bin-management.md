@@ -3062,21 +3062,23 @@ Below the list, render the BinPicker for add/move:
 
 - [ ] **Step 3: Pass `currentBinId` and a refetch callback from page contexts**
 
-In `app/bins/[id]/page.tsx`, add a `refreshKey` state and pass it to NoteList. Find the existing `useEffect` that fetches notes; add `refreshKey` to its dependency array. Then in JSX:
+Note: both pages already use `const [reading, setReading] = useState<string | null>(null)` for the ReadingPane — keep that. The new addition is just `refreshKey` and the new NoteList props.
+
+In `app/bins/[id]/page.tsx`, add a `refreshKey` state. Find the existing `useEffect` that fetches notes; add `refreshKey` to its dependency array. Add the new props to the existing `<NoteList>`:
 
 ```tsx
 const [refreshKey, setRefreshKey] = useState(0);
 
-// existing useEffect, with refreshKey added:
+// existing useEffect, with refreshKey added to deps:
 useEffect(() => {
   fetch(`/api/notes?bin=${params.id}`).then((r) => r.json()).then((d) => setNotes(d.notes ?? []));
 }, [params.id, refreshKey]);
 
-// in JSX where <NoteList /> is rendered:
+// existing <NoteList /> — add currentBinId + onMutated, keep onNoteClick + selectedPath:
 <NoteList
   notes={notes}
-  onNoteClick={(note) => setSelected(note)}
-  selectedPath={selected?.vault_path ?? null}
+  onNoteClick={(n) => setReading(n.vault_path)}
+  selectedPath={reading}
   currentBinId={params.id}
   onMutated={() => setRefreshKey((k) => k + 1)}
 />
@@ -3091,11 +3093,11 @@ useEffect(() => {
   fetch("/api/notes?limit=100").then((r) => r.json()).then((d) => setNotes(d.notes ?? []));
 }, [refreshKey]);
 
-// in JSX:
+// existing <NoteList /> — add currentBinId={null} + onMutated:
 <NoteList
   notes={notes}
-  onNoteClick={(note) => setSelected(note)}
-  selectedPath={selected?.vault_path ?? null}
+  onNoteClick={(n) => setReading(n.vault_path)}
+  selectedPath={reading}
   currentBinId={null}
   onMutated={() => setRefreshKey((k) => k + 1)}
 />
