@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { BinNode } from "@/lib/types";
 import { ChevronDownIcon, ChevronIcon } from "./icons";
 import { useContextMenu } from "./ContextMenu";
+import { useToast } from "./chat/ToastProvider";
+import { useDrag, useDrop, useIsCommandHeld } from "@/lib/dnd";
 
 interface BinTreeProps {
   bins: BinNode[];
@@ -54,22 +56,40 @@ export function BinTree({
       {bins.length === 0 ? (
         <li className="text-text-muted px-2 py-1 text-2xs">No bins yet.</li>
       ) : (
-        bins.map((bin) => (
-          <BinRow
-            key={bin.id}
-            node={bin}
-            depth={0}
-            selectedBinId={selectedBinId}
-            onSelect={onSelect}
-            visibleIds={visibleIds}
-            forceExpand={!!filterQuery}
+        <>
+          {bins.map((bin, i) => (
+            <Fragment key={bin.id}>
+              <DropStrip
+                parentId={null}
+                beforeNode={bin}
+                prevNode={bins[i - 1] ?? null}
+                lastNode={bins[bins.length - 1] ?? null}
+                onRefresh={onRefresh}
+              />
+              <BinRow
+                node={bin}
+                parentBinId={null}
+                depth={0}
+                selectedBinId={selectedBinId}
+                onSelect={onSelect}
+                visibleIds={visibleIds}
+                forceExpand={!!filterQuery}
+                onRefresh={onRefresh}
+                onRequestNewChild={onRequestNewChild}
+                onRequestMoveBin={onRequestMoveBin}
+                onRequestMerge={onRequestMerge}
+                onRequestDelete={onRequestDelete}
+              />
+            </Fragment>
+          ))}
+          <DropStrip
+            parentId={null}
+            beforeNode={null}
+            prevNode={bins[bins.length - 1] ?? null}
+            lastNode={bins[bins.length - 1] ?? null}
             onRefresh={onRefresh}
-            onRequestNewChild={onRequestNewChild}
-            onRequestMoveBin={onRequestMoveBin}
-            onRequestMerge={onRequestMerge}
-            onRequestDelete={onRequestDelete}
           />
-        ))
+        </>
       )}
     </ul>
   );
@@ -77,6 +97,7 @@ export function BinTree({
 
 interface BinRowProps {
   node: BinNode;
+  parentBinId: string | null;
   depth: number;
   selectedBinId: string | null;
   onSelect: (binId: string | null) => void;
@@ -91,6 +112,7 @@ interface BinRowProps {
 
 function BinRow({
   node,
+  parentBinId,
   depth,
   selectedBinId,
   onSelect,
@@ -108,6 +130,43 @@ function BinRow({
   const [editError, setEditError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const menu = useContextMenu();
+  const { show } = useToast();
+
+  // Drag-and-drop wiring (T23)
+  const dragProps = useDrag({ kind: "bin", id: node.id });
+  // useIsCommandHeld kept for future modifier-aware behavior (e.g., copy vs move)
+  // but unused here — destructured to avoid unused-import lint.
+  useIsCommandHeld();
+
+  const { hover, dropProps } = useDrop({
+    accept: (payload) => {
+      if (payload.kind === "bin") return payload.id !== node.id;
+      if (payload.kind === "note") return true;
+      return false;
+    },
+    onDrop: async (payload) => {
+      if (payload.kind === "bin") {
+        // Re-parent: PATCH parent_bin_id
+        try {
+          const res = await fetch(`/api/bins/${payload.id}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ parent_bin_id: node.id }),
+          });
+          if (res.ok) {
+            onRefresh?.();
+          } else {
+            const err = await res.json().catch(() => ({}));
+            show(err.error ?? `Re-parent failed (${res.status})`, "error");
+          }
+        } catch (e) {
+          show(e instanceof Error ? e.message : "Re-parent failed", "error");
+        }
+      } else if (payload.kind === "note") {
+        // Note drop handling — wired in T24. For now, no-op.
+      }
+    },
+  });
 
   useEffect(() => {
     if (editing && inputRef.current) {
@@ -166,9 +225,25 @@ function BinRow({
     menu.open(e, items);
   }
 
+  const ringClass =
+    hover === "valid"
+      ? "ring-2 ring-accent"
+      : hover === "invalid"
+      ? "ring-2 ring-red-500 ring-dashed"
+      : "";
+
+  // Suppress unused-var warning for parentBinId — it's part of the API for
+  // future use (e.g., sibling-aware drop targets) and clarifies the tree shape.
+  void parentBinId;
+
   return (
     <li role="treeitem" aria-expanded={hasChildren ? open : undefined} aria-selected={isSelected}>
-      <div className="flex items-center gap-1" onContextMenu={handleContextMenu}>
+      <div
+        className={`flex items-center gap-1 rounded-sm ${ringClass}`}
+        onContextMenu={handleContextMenu}
+        {...dragProps}
+        {...dropProps}
+      >
         {hasChildren ? (
           <button
             onClick={() => setExpanded((e) => !e)}
@@ -219,24 +294,90 @@ function BinRow({
       </div>
       {open && hasChildren && (
         <ul className="pl-0">
-          {node.children.map((child) => (
-            <BinRow
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              selectedBinId={selectedBinId}
-              onSelect={onSelect}
-              visibleIds={visibleIds}
-              forceExpand={forceExpand}
-              onRefresh={onRefresh}
-              onRequestNewChild={onRequestNewChild}
-              onRequestMoveBin={onRequestMoveBin}
-              onRequestMerge={onRequestMerge}
-              onRequestDelete={onRequestDelete}
-            />
+          {node.children.map((child, i) => (
+            <Fragment key={child.id}>
+              <DropStrip
+                parentId={node.id}
+                beforeNode={child}
+                prevNode={node.children[i - 1] ?? null}
+                lastNode={node.children[node.children.length - 1] ?? null}
+                onRefresh={onRefresh}
+              />
+              <BinRow
+                node={child}
+                parentBinId={node.id}
+                depth={depth + 1}
+                selectedBinId={selectedBinId}
+                onSelect={onSelect}
+                visibleIds={visibleIds}
+                forceExpand={forceExpand}
+                onRefresh={onRefresh}
+                onRequestNewChild={onRequestNewChild}
+                onRequestMoveBin={onRequestMoveBin}
+                onRequestMerge={onRequestMerge}
+                onRequestDelete={onRequestDelete}
+              />
+            </Fragment>
           ))}
+          <DropStrip
+            parentId={node.id}
+            beforeNode={null}
+            prevNode={node.children[node.children.length - 1] ?? null}
+            lastNode={node.children[node.children.length - 1] ?? null}
+            onRefresh={onRefresh}
+          />
         </ul>
       )}
     </li>
   );
+}
+
+function DropStrip({
+  parentId,
+  beforeNode,
+  prevNode,
+  lastNode,
+  onRefresh,
+}: {
+  parentId: string | null;
+  beforeNode: BinNode | null; // null = drop at end
+  prevNode: BinNode | null;
+  lastNode: BinNode | null;
+  onRefresh?: () => void;
+}) {
+  const { hover, dropProps } = useDrop({
+    accept: (payload) => payload.kind === "bin",
+    onDrop: async (payload) => {
+      const newSortOrder = computeNewSortOrder(prevNode, beforeNode, lastNode);
+      try {
+        const res = await fetch(`/api/bins/${payload.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sort_order: newSortOrder, parent_bin_id: parentId }),
+        });
+        if (res.ok) onRefresh?.();
+      } catch {
+        /* error toast handled by re-parent path */
+      }
+    },
+  });
+  return (
+    <li
+      role="presentation"
+      aria-hidden="true"
+      {...dropProps}
+      className={`h-1 -my-0.5 list-none ${hover === "valid" ? "bg-accent" : "bg-transparent"}`}
+    />
+  );
+}
+
+function computeNewSortOrder(
+  prev: BinNode | null,
+  before: BinNode | null,
+  last: BinNode | null
+): number {
+  if (prev && before) return ((prev.sort_order ?? 0) + (before.sort_order ?? 0)) / 2;
+  if (!prev && before) return (before.sort_order ?? 0) - 1000;
+  if (last) return (last.sort_order ?? 0) + 1000;
+  return 0;
 }
