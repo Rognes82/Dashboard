@@ -132,6 +132,7 @@ export function Sidebar({
         parentBinName={createParent.name ?? null}
         onClose={() => setCreateOpen(false)}
         onCreated={(newId) => {
+          setFilter("");
           setRefreshKey((k) => k + 1);
           onSelectBin(newId);
         }}
