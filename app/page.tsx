@@ -6,7 +6,7 @@ import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
 import { ChatMessages, parseCitations, type ChatMessage } from "@/components/chat/ChatMessages";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ScopeBadge } from "@/components/chat/ScopeBadge";
-import { ToastProvider, useToast } from "@/components/chat/ToastProvider";
+import { useToast } from "@/components/chat/ToastProvider";
 import { ReadingPane } from "@/components/ReadingPane";
 
 interface SuggestedPromptsResponse {
@@ -217,9 +217,5 @@ function ChatPageInner() {
 }
 
 export default function ChatPage() {
-  return (
-    <ToastProvider>
-      <ChatPageInner />
-    </ToastProvider>
-  );
+  return <ChatPageInner />;
 }

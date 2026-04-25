@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { GlobalCapture } from "@/components/GlobalCapture";
+import { ToastProvider } from "@/components/chat/ToastProvider";
+import { ContextMenuProvider } from "@/components/ContextMenu";
 import "./globals.css";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -14,11 +16,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <title>Command Center</title>
       </head>
       <body>
-        <Sidebar selectedBinId={selectedBinId} onSelectBin={setSelectedBinId} />
-        <GlobalCapture />
-        <main className="ml-[220px] min-h-screen bg-base" data-selected-bin={selectedBinId ?? ""}>
-          {children}
-        </main>
+        <ToastProvider>
+          <ContextMenuProvider>
+            <Sidebar selectedBinId={selectedBinId} onSelectBin={setSelectedBinId} />
+            <GlobalCapture />
+            <main className="ml-[220px] min-h-screen bg-base" data-selected-bin={selectedBinId ?? ""}>
+              {children}
+            </main>
+            <div id="context-menu-root" />
+          </ContextMenuProvider>
+        </ToastProvider>
       </body>
     </html>
   );
