@@ -188,3 +188,49 @@ export function moveNoteBetweenBins(
   });
   tx();
 }
+
+export interface BinDeletePreview {
+  child_bin_count: number;
+  child_bin_names: string[];
+  has_more_children: boolean;
+  note_count: number;
+}
+
+/**
+ * Returns counts used by the delete confirmation dialog.
+ * Notes counted once even if assigned to multiple descendants.
+ */
+export function getBinDeletePreview(id: string): BinDeletePreview {
+  const db = getDb();
+  // Recursive descendants (does not include self)
+  const descendants = db
+    .prepare(
+      `WITH RECURSIVE d(id) AS (
+         SELECT id FROM bins WHERE parent_bin_id = ?
+         UNION ALL
+         SELECT b.id FROM bins b JOIN d ON b.parent_bin_id = d.id
+       )
+       SELECT id FROM d`
+    )
+    .all(id) as { id: string }[];
+  const child_bin_count = descendants.length;
+
+  // Immediate children, alphabetical, first 5 + has-more flag
+  const immediate = db
+    .prepare("SELECT name FROM bins WHERE parent_bin_id = ? ORDER BY name COLLATE NOCASE ASC")
+    .all(id) as { name: string }[];
+  const child_bin_names = immediate.slice(0, 5).map((r) => r.name);
+  const has_more_children = immediate.length > 5;
+
+  // Distinct notes assigned to this bin OR any descendant
+  const allBinIds = [id, ...descendants.map((d) => d.id)];
+  const placeholders = allBinIds.map(() => "?").join(",");
+  const noteRow = db
+    .prepare(
+      `SELECT COUNT(DISTINCT note_id) AS n FROM note_bins WHERE bin_id IN (${placeholders})`
+    )
+    .get(...allBinIds) as { n: number };
+  const note_count = noteRow.n;
+
+  return { child_bin_count, child_bin_names, has_more_children, note_count };
+}

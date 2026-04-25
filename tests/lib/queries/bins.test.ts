@@ -14,6 +14,7 @@ import {
   getOrCreateBinBySeed,
   isDescendantOf,
   moveNoteBetweenBins,
+  getBinDeletePreview,
 } from "../../../lib/queries/bins";
 import { upsertVaultNote } from "../../../lib/queries/vault-notes";
 import { nowIso } from "../../../lib/utils";
@@ -224,6 +225,51 @@ describe("bins queries", () => {
       mergeBin(source.id, target.id);
       const bins = listBinsForNote(noteRow.id).map((x) => x.id);
       expect(bins).toEqual([target.id]);
+    });
+  });
+
+  describe("getBinDeletePreview", () => {
+    it("returns zero counts for an empty bin", () => {
+      const bin = createBin({ name: "Empty" });
+      const preview = getBinDeletePreview(bin.id);
+      expect(preview).toEqual({
+        child_bin_count: 0,
+        child_bin_names: [],
+        has_more_children: false,
+        note_count: 0,
+      });
+    });
+    it("counts direct + recursive descendants", () => {
+      const root = createBin({ name: "Root" });
+      const c1 = createBin({ name: "alpha", parent_bin_id: root.id });
+      const c2 = createBin({ name: "bravo", parent_bin_id: root.id });
+      createBin({ name: "grand", parent_bin_id: c1.id });
+      const preview = getBinDeletePreview(root.id);
+      expect(preview.child_bin_count).toBe(3); // c1 + c2 + grand
+      expect(preview.child_bin_names).toEqual(["alpha", "bravo"]);
+      expect(preview.has_more_children).toBe(false);
+    });
+    it("limits child_bin_names to first 5 alphabetical and sets has_more_children", () => {
+      const root = createBin({ name: "Root" });
+      ["e", "d", "c", "b", "a", "g", "f"].forEach((n) =>
+        createBin({ name: n, parent_bin_id: root.id })
+      );
+      const preview = getBinDeletePreview(root.id);
+      expect(preview.child_bin_names).toEqual(["a", "b", "c", "d", "e"]);
+      expect(preview.has_more_children).toBe(true);
+    });
+    it("counts distinct notes once even if assigned to multiple descendants", () => {
+      const noteRow = upsertVaultNote({
+        vault_path: "test/dist.md", source: "obsidian",
+        source_id: null, source_url: null,
+        title: "T", content_hash: "h", modified_at: nowIso(),
+      });
+      const root = createBin({ name: "Root" });
+      const a = createBin({ name: "A", parent_bin_id: root.id });
+      const b = createBin({ name: "B", parent_bin_id: root.id });
+      assignNoteToBin({ note_id: noteRow.id, bin_id: a.id, assigned_by: "manual" });
+      assignNoteToBin({ note_id: noteRow.id, bin_id: b.id, assigned_by: "manual" });
+      expect(getBinDeletePreview(root.id).note_count).toBe(1);
     });
   });
 });
