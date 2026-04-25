@@ -203,9 +203,9 @@ UI surfaces the 403 as a toast: "Cannot delete a synced bin." This guard is the 
 
 ```sql
 -- Before:
-sort_order INTEGER NOT NULL DEFAULT 0
+sort_order INTEGER DEFAULT 0
 -- After:
-sort_order REAL NOT NULL DEFAULT 0
+sort_order REAL DEFAULT 0
 ```
 
 Reason: client-side averaging for drag-reorder produces fractional values that INTEGER would truncate, causing collisions after ~10 consecutive reorders in the same gap. SQLite's REAL preserves the precision indefinitely at the user's expected scale.
@@ -315,7 +315,7 @@ When a note's `bins.length > 1`, render a small `·N` badge in the row's right s
 
 When the source is ambiguous and the user holds ⌘ on drop, fall back to **Add** behavior and show a toast: `"Hold ⌘ to move only when a single source bin is clear"`. The drop indicator stays cyan (drop is allowed); only the post-drop toast informs the user that Move was downgraded.
 
-This rule is enforced in the same `useDrop` handler (§5.7) — read the modifier state from `dataTransfer.dropEffect` or a sibling React state, branch into Add or Move based on the disambiguation check.
+This rule is enforced in the same `useDrop` handler (§5.7) — track ⌘ via a window `keydown`/`keyup` listener that writes `isCommandHeld` to React state while a drag is active (the standard HTML5 drag API doesn't expose modifier state on the drop event). Branch into Add or Move based on `isCommandHeld` plus the disambiguation check.
 
 ### 5.4 Drop indicators
 
