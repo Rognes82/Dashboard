@@ -15,6 +15,7 @@ import {
   isDescendantOf,
   moveNoteBetweenBins,
   getBinDeletePreview,
+  getBinMergePreview,
 } from "../../../lib/queries/bins";
 import { upsertVaultNote } from "../../../lib/queries/vault-notes";
 import { nowIso } from "../../../lib/utils";
@@ -270,6 +271,27 @@ describe("bins queries", () => {
       assignNoteToBin({ note_id: noteRow.id, bin_id: a.id, assigned_by: "manual" });
       assignNoteToBin({ note_id: noteRow.id, bin_id: b.id, assigned_by: "manual" });
       expect(getBinDeletePreview(root.id).note_count).toBe(1);
+    });
+  });
+
+  describe("getBinMergePreview", () => {
+    it("counts only direct children and direct note assignments", () => {
+      const noteRow = upsertVaultNote({
+        vault_path: "test/merge-pv.md", source: "obsidian",
+        source_id: null, source_url: null,
+        title: "T", content_hash: "h", modified_at: nowIso(),
+      });
+      const root = createBin({ name: "Root" });
+      const directChild = createBin({ name: "Direct", parent_bin_id: root.id });
+      createBin({ name: "Grand", parent_bin_id: directChild.id }); // NOT counted
+      assignNoteToBin({ note_id: noteRow.id, bin_id: root.id, assigned_by: "manual" });
+      const preview = getBinMergePreview(root.id);
+      expect(preview.direct_child_count).toBe(1);
+      expect(preview.direct_note_count).toBe(1);
+    });
+    it("returns zero counts for empty bin", () => {
+      const bin = createBin({ name: "Empty" });
+      expect(getBinMergePreview(bin.id)).toEqual({ direct_child_count: 0, direct_note_count: 0 });
     });
   });
 });

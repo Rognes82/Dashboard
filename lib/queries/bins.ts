@@ -234,3 +234,23 @@ export function getBinDeletePreview(id: string): BinDeletePreview {
 
   return { child_bin_count, child_bin_names, has_more_children, note_count };
 }
+
+export interface BinMergePreview {
+  direct_child_count: number;
+  direct_note_count: number;
+}
+
+/**
+ * Returns counts used by the merge confirmation dialog.
+ * Direct only — sub-bins keep identity (not merged), so their notes stay with them.
+ */
+export function getBinMergePreview(id: string): BinMergePreview {
+  const db = getDb();
+  const c = db
+    .prepare("SELECT COUNT(*) AS n FROM bins WHERE parent_bin_id = ?")
+    .get(id) as { n: number };
+  const n = db
+    .prepare("SELECT COUNT(*) AS n FROM note_bins WHERE bin_id = ?")
+    .get(id) as { n: number };
+  return { direct_child_count: c.n, direct_note_count: n.n };
+}
