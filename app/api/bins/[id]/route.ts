@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getBinById, updateBin, deleteBin, mergeBin } from "@/lib/queries/bins";
+import { getBinById, updateBin, deleteBin, mergeBin, isDescendantOf } from "@/lib/queries/bins";
 import { badRequest, isNonEmptyString, isOptionalString, readJson } from "@/lib/validation";
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
@@ -20,6 +20,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (b.name !== undefined && !isNonEmptyString(b.name, 120)) return badRequest("name must be non-empty string (<=120)");
   if (!isOptionalString(b.parent_bin_id, 32)) return badRequest("parent_bin_id must be string");
   if (b.sort_order !== undefined && typeof b.sort_order !== "number") return badRequest("sort_order must be number");
+
+  // Cycle prevention for parent_bin_id changes
+  if (typeof b.parent_bin_id === "string") {
+    if (b.parent_bin_id === params.id) return badRequest("bin cannot be its own parent");
+    if (isDescendantOf(b.parent_bin_id, params.id)) {
+      return badRequest("bin cannot be a child of its own descendant");
+    }
+  }
 
   const updated = updateBin(params.id, {
     name: b.name as string | undefined,
