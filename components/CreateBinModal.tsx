@@ -56,7 +56,7 @@ export function CreateBinModal({ open, parentBinId, parentBinName, onClose, onCr
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter" && valid) handleSubmit(); }}
+        onKeyDown={(e) => { if (e.key === "Enter" && valid && !submitting) handleSubmit(); }}
         placeholder="Bin name"
         className="w-full px-3 py-2 bg-base border border-border-default rounded text-text-primary outline-none focus:border-accent"
       />
