@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { GlobalCapture } from "@/components/GlobalCapture";
 import { ToastProvider } from "@/components/chat/ToastProvider";
 import { ContextMenuProvider } from "@/components/ContextMenu";
+import { DragModifierHint } from "@/components/DragModifierHint";
 import "./globals.css";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <main className="ml-[220px] min-h-screen bg-base" data-selected-bin={selectedBinId ?? ""}>
               {children}
             </main>
+            <DragModifierHint />
             <div id="context-menu-root" />
           </ContextMenuProvider>
         </ToastProvider>
