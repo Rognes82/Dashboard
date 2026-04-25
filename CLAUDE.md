@@ -22,10 +22,11 @@ local via settings.
 
 ## Current state (as of last session)
 
-**Branch:** `feature/thought-organizer-v12` — v1.2 agent-first redesign.
-**Tests:** 160 passing, lint clean, build clean.
+**Branch:** `feature/thought-organizer-v12` — v1.2 (agent-first redesign) + v1.2.1 (manual bin management).
+**Tests:** 189 passing, lint clean, build clean.
 **Merged to main?** No. Phase 1 (v1.0) and Phase 2 (v1.1) are on main.
 **Deployed to Mac Mini?** Never. Still local-only on the MacBook.
+**Manual smoke pending?** v1.2.1 needs the user-driven smoke walkthrough listed in `docs/superpowers/plans/2026-04-25-manual-bin-management.md` Task 25 Step 5.
 
 **What shipped in v1.2:**
 - Full UI redesign — chat-primary layout, persistent bin tree sidebar, dark gray +
@@ -36,6 +37,25 @@ local via settings.
 - Settings rebuild with profile CRUD + Notion targets + sync health
 - Retired pages (`/clients` etc.) still render with a banner, unlinked from nav
 - Legacy `/notes` redirects to `/bins`
+
+**What shipped in v1.2.1:**
+- Sidebar `+ new bin` button (top-level create)
+- Right-click context menu on bins — New child / Rename (inline) / Move bin / Merge into / Delete (hidden for seeded `notion-sync`)
+- Right-click context menu on note rows — Open / Add to bin / Move to bin / Remove from this bin (last two visibility-gated by source bin disambiguation)
+- Drag-and-drop on bin tree — drag bin onto bin re-parents, drag between siblings reorders (sort_order REAL averaging), drag note onto bin adds (⌘+drag = move when source unambiguous, else add with warn toast)
+- Drop indicators (cyan ring on row, cyan strip between rows, red dashed for invalid)
+- Reusable primitives — Modal (focus trap, Esc, body scroll lock), ContextMenu (portal-positioned), DragModifierHint pill ("Add" / "Move (⌘)")
+- BinPicker modal (Finder-style outline tree with filter), CreateBinModal, DeleteBinModal (blast-radius preview), MergeBinModal (sub-bin re-parent warning)
+- Server-side guards — DELETE 403 for seeded bins, PATCH cycle prevention via recursive CTE
+- Bug fix in `mergeBin` — re-parents source's children to target before deleting source (cascade was destroying them)
+- Cross-tree refresh signal via `dashboard-bins-mutated` CustomEvent so page lists update after sidebar drag mutations
+
+**Known v1.2.1 deferrals (handed off to v1.2.2 / v1.3):**
+- Multi-bin badge `·N` and Recent-view "Move to bin" both require extending `GET /api/notes` to include `bins[]` per note — wired but unfed (props exist, page doesn't supply data)
+- `findBinInTree` / `findBy` duplicate logic between Sidebar and BinPicker — extract to `lib/bins/tree.ts`
+- Merge-flow uses 4 separate state vars in Sidebar — consolidate into a discriminated union
+- `BinTree.tsx` is 433 lines — consider extracting `<SiblingList>` and `<NoteRow>` patterns into `components/bin-tree/`
+- Sort_order degenerate-gap guard — fine in practice but no escape hatch yet
 
 ## User's vision that ISN'T built yet
 
@@ -51,14 +71,7 @@ auto-classify — idea-level extraction. Outside every spec written so far.
 
 ## Roadmap forward
 
-**v1.2.1 — Manual bin management UI** (shortest path, ~1 week)
-Gap we missed in v1.2. Add:
-- "+ new bin" button in sidebar with parent picker (nesting)
-- Right-click note → move to bin
-- Right-click bin → rename / merge / delete
-- APIs exist (`POST /api/bins`, `POST /api/bins/[id]/assign`, etc.) — just no UI yet
-This gives the user agency over their structure BEFORE any agent does binning.
-You can't sanely build a classifier on an empty bin set.
+**v1.2.1 — Manual bin management UI** ✅ shipped (pending manual smoke). All 25 plan tasks complete on the same `feature/thought-organizer-v12` branch. Spec + plan in `docs/superpowers/{specs,plans}/2026-04-25-manual-bin-management-*.md`.
 
 **v1.3 — Whole-note auto-classify** (scoped in original spec §9, ~2 weeks)
 - `scripts/agent-classify.ts` reads uncategorized notes, asks LLM to pick a bin
@@ -168,15 +181,21 @@ concrete paths forward, and recommend one.
 
 ## What to do next session
 
-User's immediate next goal: **continue down the roadmap**. Start v1.2.1 (manual
-bin UI) or jump to v1.3 (auto-classify agent). User's preference expressed last
-session: manual UI first, then classifier, then segment extraction.
+v1.2.1 is functionally complete; user's immediate next decisions:
+1. **Run the manual smoke** for v1.2.1 (Task 25 Step 5 checklist in the plan) — verifies right-click flows, drag-and-drop, modals end-to-end. Tip: `rm data/dashboard.db` first if you want to see the new REAL `sort_order` declaration take effect (existing DB keeps the old INTEGER per `CREATE TABLE IF NOT EXISTS`; SQLite dynamic typing means fractional values still work in the old column anyway).
+2. **Either** patch any smoke-test findings, **or** decide on next phase:
+   - **v1.2.2 cleanup** — populate `noteBins` (extend GET /api/notes), extract `findBinById` shared util, consolidate merge state into discriminated union, split BinTree.tsx
+   - **v1.3 auto-classify agent** — `scripts/agent-classify.ts` for uncategorized notes
+   - **v1.4 segment extraction** — needs new brainstorm cycle
+   - **Phase 4 deploy** — Mac Mini launchd plist, cron, backups
 
 Pattern to follow: brainstorm → spec → Kimi audit → plan → Kimi audit → execute
-(subagent-driven, Opus). Commit on a new feature branch off main or off v12.
+(subagent-driven, Opus).
 
 When picking up, verify:
-- `git branch --show-current` — should be on `feature/thought-organizer-v12` (v1.2 is there, not merged)
-- `npm test` — should show 160 passing
+- `git branch --show-current` — should be on `feature/thought-organizer-v12` (v1.2 + v1.2.1 are there, not merged)
+- `npm test` — should show 189 passing
+- `npm run lint` — clean
+- `npm run build` — clean
 - Dev server — if cold, start with `VAULT_PATH=$HOME/Vault PORT=3001 npm run dev`
 - Dashboard at http://localhost:3001 — chat should stream with an active profile
