@@ -29,14 +29,17 @@ export default function BinDetailPage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const [reading, setReading] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [noteBins, setNoteBins] = useState<Map<string, string[]>>(new Map());
 
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      fetch(`/api/notes?bin=${encodeURIComponent(params.id)}&limit=500`).then((r) => r.json()),
+      fetch(`/api/notes?bin=${encodeURIComponent(params.id)}&include=bins&limit=500`).then((r) => r.json()),
       fetch(`/api/bins`).then((r) => r.json()),
     ]).then(([notesResp, binsResp]) => {
-      setNotes(notesResp.notes ?? []);
+      const notesArray = (notesResp.notes ?? []) as Array<VaultNote & { bins: string[] }>;
+      setNotes(notesArray);
+      setNoteBins(new Map(notesArray.map((n) => [n.id, n.bins ?? []])));
       const p = findPath(binsResp.bins ?? [], params.id);
       if (p) setPath(p);
       setLoading(false);
@@ -73,6 +76,8 @@ export default function BinDetailPage({ params }: { params: { id: string } }) {
             selectedPath={reading}
             emptyMessage="No notes in this bin yet."
             currentBinId={params.id}
+            currentBinName={path.at(-1) ?? ""}
+            noteBins={noteBins}
             onMutated={() => setRefreshKey((k) => k + 1)}
           />
         )}

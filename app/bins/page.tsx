@@ -10,12 +10,17 @@ export default function BinsDefaultPage() {
   const [loading, setLoading] = useState(true);
   const [reading, setReading] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [noteBins, setNoteBins] = useState<Map<string, string[]>>(new Map());
 
   useEffect(() => {
     setLoading(true);
-    fetch("/api/notes?limit=100")
+    fetch("/api/notes?include=bins&limit=100")
       .then((r) => r.json())
-      .then((d) => setNotes(d.notes ?? []))
+      .then((d) => {
+        const notesArray = (d.notes ?? []) as Array<VaultNote & { bins: string[] }>;
+        setNotes(notesArray);
+        setNoteBins(new Map(notesArray.map((n) => [n.id, n.bins ?? []])));
+      })
       .finally(() => setLoading(false));
   }, [refreshKey]);
 
@@ -45,6 +50,7 @@ export default function BinsDefaultPage() {
             selectedPath={reading}
             emptyMessage="No notes yet."
             currentBinId={null}
+            noteBins={noteBins}
             onMutated={() => setRefreshKey((k) => k + 1)}
           />
         )}
