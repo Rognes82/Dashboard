@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getBinById, moveNoteBetweenBins } from "@/lib/queries/bins";
+import { getBinById, moveNoteBetweenBins, NoteNotInSourceBinError } from "@/lib/queries/bins";
 import { badRequest, isNonEmptyString, readJson } from "@/lib/validation";
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
@@ -16,11 +16,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   try {
     moveNoteBetweenBins(params.id, b.from_bin_id as string, b.to_bin_id as string);
   } catch (err) {
-    const raw = err instanceof Error ? err.message : "";
-    // Whitelist known sentinel messages from moveNoteBetweenBins. Anything else
-    // (FK violation, SQLITE_BUSY, etc.) returns a generic message to avoid leaking server details.
-    const msg = raw === "note not in source bin" ? raw : "move failed";
-    return NextResponse.json({ error: msg }, { status: 400 });
+    if (err instanceof NoteNotInSourceBinError) {
+      return NextResponse.json({ error: "note not in source bin" }, { status: 400 });
+    }
+    // Unknown error — don't leak server details
+    return NextResponse.json({ error: "move failed" }, { status: 500 });
   }
   return NextResponse.json({ ok: true });
 }

@@ -38,7 +38,7 @@ describe("POST /api/notes/[id]/move", () => {
     expect(ids).toEqual([b.id]);
   });
 
-  it("returns 400 if note is not in source bin", async () => {
+  it("returns 400 with 'note not in source bin' error body when note is not in source bin", async () => {
     const note = upsertVaultNote({
       vault_path: "y.md", source: "obsidian",
       source_id: null, source_url: null,
@@ -49,6 +49,8 @@ describe("POST /api/notes/[id]/move", () => {
     const req = new Request("http://x", { method: "POST", body: JSON.stringify({ from_bin_id: a.id, to_bin_id: b.id }) });
     const res = await POST(req, { params: { id: note.id } });
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("note not in source bin");
   });
 
   it("returns 404 if a bin is missing", async () => {
