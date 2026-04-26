@@ -690,6 +690,15 @@ describe("parseClassifierOutput", () => {
     expect(() => parseClassifierOutput(json)).toThrow(ClassifierOutputError);
   });
 
+  it("throws on empty proposed_new_bin.path", () => {
+    const json = JSON.stringify({
+      existing_match: { bin_path: "a", confidence: 0.5, reasoning: "r" },
+      proposed_new_bin: { path: "", rating: 0.8, reasoning: "r" },
+      no_fit_reasoning: null,
+    });
+    expect(() => parseClassifierOutput(json)).toThrow(ClassifierOutputError);
+  });
+
   it("strips fenced code blocks before parsing", () => {
     const fenced = "```json\n" + JSON.stringify({
       existing_match: { bin_path: "a", confidence: 0.5, reasoning: "r" },
@@ -826,7 +835,24 @@ describe("decide", () => {
     };
     const result = decide(out, T, tree);
     expect(result.action).toBe("auto_assign");
-    if (result.action === "auto_assign") expect(result.bin_id).toBe("b-jp");
+    if (result.action === "auto_assign") {
+      expect(result.bin_id).toBe("b-jp");
+      expect(result.converted_from_new_bin).toBe(true);
+      expect(result.confidence_used).toBe(0.95);
+    }
+  });
+
+  it("auto_assign sets converted_from_new_bin = false on existing-bin match", () => {
+    const out: ClassifierOutput = {
+      existing_match: existing("travel/japan", 0.8),
+      proposed_new_bin: null,
+      no_fit_reasoning: null,
+    };
+    const result = decide(out, T, tree);
+    if (result.action === "auto_assign") {
+      expect(result.converted_from_new_bin).toBe(false);
+      expect(result.confidence_used).toBe(0.8);
+    }
   });
 
   it("auto_create_bin when rating >= floor, margin >= margin_threshold, parent exists", () => {
@@ -1303,13 +1329,16 @@ describe("createRateLimiter", () => {
   });
 
   it("delays the request that exceeds the bucket", async () => {
-    const acquire = createRateLimiter({ rpm: 2, windowMs: 200 });
+    // 2 RPM over a 300ms window → 1 token refills every 150ms.
+    // After draining the initial 2 tokens, the 3rd must wait ≥80ms (jitter-tolerant)
+    // before a refill makes one available.
+    const acquire = createRateLimiter({ rpm: 2, windowMs: 300 });
     await acquire();
     await acquire();
     const start = Date.now();
     await acquire();
     const elapsed = Date.now() - start;
-    expect(elapsed).toBeGreaterThanOrEqual(150);
+    expect(elapsed).toBeGreaterThanOrEqual(80);
   });
 
   it("refills tokens over time", async () => {
@@ -1443,20 +1472,17 @@ function init(): void {
   migrate(db);
 }
 
-function seedNote(id = "n-1"): void {
-  upsertVaultNote({
-    id,
-    vault_path: `${id}.md`,
-    title: id,
+function seedNote(slug = "note-a"): string {
+  const note = upsertVaultNote({
+    vault_path: `${slug}.md`,
+    title: slug,
     source: "obsidian",
+    source_id: null,
+    source_url: null,
     content_hash: "h",
     modified_at: nowIso(),
-    frontmatter: {},
-    plain_text: "body",
-    excerpt: null,
-    word_count: 1,
-    tags: [],
   });
+  return note.id;
 }
 
 describe("classifier_runs", () => {
@@ -1506,11 +1532,11 @@ describe("proposals + log", () => {
   afterEach(() => { closeDb(); if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB); });
 
   it("insertProposal then listPendingProposals returns it", () => {
-    seedNote("n-1");
+    const noteId = seedNote("note-a");
     const bin = createBin({ name: "Travel" });
     const runId = insertClassifierRun({ trigger: "manual" });
     insertProposal({
-      note_id: "n-1",
+      note_id: noteId,
       proposed_existing_bin_id: bin.id,
       existing_confidence: 0.5,
       proposed_new_bin_path: null,
@@ -1523,17 +1549,17 @@ describe("proposals + log", () => {
     });
     const pending = listPendingProposals();
     expect(pending.length).toBe(1);
-    expect(pending[0].note_id).toBe("n-1");
+    expect(pending[0].note_id).toBe(noteId);
   });
 
   it("listRecentlyAutoClassified excludes notes with newer 'undone' rows", () => {
-    seedNote("n-1");
+    const noteId = seedNote("note-a");
     const bin = createBin({ name: "Travel" });
     const runId = insertClassifierRun({ trigger: "manual" });
     const t = Date.now();
     insertLogRow({
       action: "auto_assign",
-      note_id: "n-1",
+      note_id: noteId,
       bin_id: bin.id,
       new_bin_path: null,
       existing_confidence: 0.9,
@@ -1548,7 +1574,7 @@ describe("proposals + log", () => {
     expect(listRecentlyAutoClassified().length).toBe(1);
     insertLogRow({
       action: "undone",
-      note_id: "n-1",
+      note_id: noteId,
       bin_id: bin.id,
       new_bin_path: null,
       existing_confidence: null,
@@ -1569,13 +1595,13 @@ describe("setClassifierSkip", () => {
   afterEach(() => { closeDb(); if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB); });
 
   it("toggles classifier_skip flag", () => {
-    seedNote("n-1");
-    setClassifierSkip("n-1", true);
+    const noteId = seedNote("note-a");
+    setClassifierSkip(noteId, true);
     const db = getDb();
-    const row = db.prepare("SELECT classifier_skip FROM vault_notes WHERE id = 'n-1'").get() as { classifier_skip: number };
+    const row = db.prepare("SELECT classifier_skip FROM vault_notes WHERE id = ?").get(noteId) as { classifier_skip: number };
     expect(row.classifier_skip).toBe(1);
-    setClassifierSkip("n-1", false);
-    const row2 = db.prepare("SELECT classifier_skip FROM vault_notes WHERE id = 'n-1'").get() as { classifier_skip: number };
+    setClassifierSkip(noteId, false);
+    const row2 = db.prepare("SELECT classifier_skip FROM vault_notes WHERE id = ?").get(noteId) as { classifier_skip: number };
     expect(row2.classifier_skip).toBe(0);
   });
 });
@@ -1967,12 +1993,13 @@ function init(): void {
   migrate(db);
 }
 
-function seedNote(id: string, title: string): void {
-  upsertVaultNote({
-    id, vault_path: `${id}.md`, title, source: "obsidian",
-    content_hash: "h", modified_at: nowIso(), frontmatter: {}, plain_text: "body",
-    excerpt: null, word_count: 1, tags: [],
+function seedNote(slug: string, title: string): string {
+  const note = upsertVaultNote({
+    vault_path: `${slug}.md`, title, source: "obsidian",
+    source_id: null, source_url: null,
+    content_hash: "h", modified_at: nowIso(),
   });
+  return note.id;
 }
 
 function fakeLlm(response: string): ClassifierLlm {
@@ -1985,18 +2012,18 @@ describe("runClassifyOnce", () => {
 
   it("auto-assigns a note when LLM is confident on existing bin", async () => {
     const bin = createBin({ name: "Travel" });
-    seedNote("n-1", "Tokyo trip");
+    const noteId = seedNote("note-a", "Tokyo trip");
     const llm = fakeLlm(JSON.stringify({
       existing_match: { bin_path: "travel", confidence: 0.9, reasoning: "Travel-related" },
       proposed_new_bin: null,
       no_fit_reasoning: null,
     }));
-    const result = await runClassifyOnce({ note: { id: "n-1", title: "Tokyo trip", frontmatter: {}, body: "Trip notes" }, llm, runId: "r1", profileId: "p1" });
+    const result = await runClassifyOnce({ note: { id: noteId, title: "Tokyo trip", frontmatter: {}, body: "Trip notes" }, llm, runId: "r1", profileId: "p1" });
     expect(result.action).toBe("auto_assign");
     const db = getDb();
-    const assignment = db.prepare("SELECT * FROM note_bins WHERE note_id = 'n-1' AND bin_id = ?").get(bin.id);
+    const assignment = db.prepare("SELECT * FROM note_bins WHERE note_id = ? AND bin_id = ?").get(noteId, bin.id);
     expect(assignment).toBeTruthy();
-    const log = db.prepare("SELECT * FROM classification_log WHERE note_id = 'n-1'").all();
+    const log = db.prepare("SELECT * FROM classification_log WHERE note_id = ?").all(noteId);
     expect(log.length).toBe(1);
     expect((log[0] as { action: string }).action).toBe("auto_assign");
   });
@@ -2004,13 +2031,13 @@ describe("runClassifyOnce", () => {
   it("auto-creates a bin when gates pass", async () => {
     const parent = createBin({ name: "Business" });
     createBin({ name: "Planning", parent_bin_id: parent.id });
-    seedNote("n-2", "Q3 OKRs");
+    const noteId = seedNote("note-okrs", "Q3 OKRs");
     const llm = fakeLlm(JSON.stringify({
       existing_match: { bin_path: "business", confidence: 0.3, reasoning: "loose" },
       proposed_new_bin: { path: "business/planning/okrs", rating: 0.85, reasoning: "OKRs doc" },
       no_fit_reasoning: null,
     }));
-    const result = await runClassifyOnce({ note: { id: "n-2", title: "Q3 OKRs", frontmatter: {}, body: "OKRs" }, llm, runId: "r1", profileId: "p1" });
+    const result = await runClassifyOnce({ note: { id: noteId, title: "Q3 OKRs", frontmatter: {}, body: "OKRs" }, llm, runId: "r1", profileId: "p1" });
     expect(result.action).toBe("auto_create_bin");
     const db = getDb();
     const newBin = db.prepare("SELECT id, name FROM bins WHERE name = 'Okrs'").get() as { id: string; name: string } | undefined;
@@ -2020,7 +2047,7 @@ describe("runClassifyOnce", () => {
   it("converts to auto_assign at commit if another note already created the bin", async () => {
     const parent = createBin({ name: "Business" });
     createBin({ name: "Planning", parent_bin_id: parent.id });
-    seedNote("n-3", "Q3 OKRs");
+    const noteId = seedNote("note-okrs2", "Q3 OKRs");
     // pre-create the bin to simulate concurrent commit
     const planning = (getDb().prepare("SELECT id FROM bins WHERE name = 'Planning'").get() as { id: string }).id;
     createBin({ name: "Okrs", parent_bin_id: planning });
@@ -2029,7 +2056,7 @@ describe("runClassifyOnce", () => {
       proposed_new_bin: { path: "business/planning/okrs", rating: 0.85, reasoning: "OKRs doc" },
       no_fit_reasoning: null,
     }));
-    const result = await runClassifyOnce({ note: { id: "n-3", title: "Q3 OKRs", frontmatter: {}, body: "OKRs" }, llm, runId: "r1", profileId: "p1" });
+    const result = await runClassifyOnce({ note: { id: noteId, title: "Q3 OKRs", frontmatter: {}, body: "OKRs" }, llm, runId: "r1", profileId: "p1" });
     expect(result.action).toBe("auto_assign");
     const db = getDb();
     const okrsBins = db.prepare("SELECT COUNT(*) as n FROM bins WHERE name = 'Okrs'").get() as { n: number };
@@ -2038,28 +2065,28 @@ describe("runClassifyOnce", () => {
 
   it("queues pending when gates fail", async () => {
     createBin({ name: "Travel" });
-    seedNote("n-4", "Vague note");
+    const noteId = seedNote("note-vague", "Vague note");
     const llm = fakeLlm(JSON.stringify({
       existing_match: { bin_path: "travel", confidence: 0.4, reasoning: "weak" },
       proposed_new_bin: null,
       no_fit_reasoning: null,
     }));
-    const result = await runClassifyOnce({ note: { id: "n-4", title: "Vague", frontmatter: {}, body: "x" }, llm, runId: "r1", profileId: "p1" });
+    const result = await runClassifyOnce({ note: { id: noteId, title: "Vague", frontmatter: {}, body: "x" }, llm, runId: "r1", profileId: "p1" });
     expect(result.action).toBe("pending");
     const db = getDb();
-    const pending = db.prepare("SELECT * FROM classification_proposals WHERE note_id = 'n-4'").get();
+    const pending = db.prepare("SELECT * FROM classification_proposals WHERE note_id = ?").get(noteId);
     expect(pending).toBeTruthy();
   });
 
   it("retries once on malformed JSON, then logs error", async () => {
     createBin({ name: "Travel" });
-    seedNote("n-5", "X");
+    const noteId = seedNote("note-bad", "X");
     const llm: ClassifierLlm = { complete: vi.fn().mockResolvedValueOnce("not json").mockResolvedValueOnce("still not json"), modelName: "fake" };
-    const result = await runClassifyOnce({ note: { id: "n-5", title: "X", frontmatter: {}, body: "x" }, llm, runId: "r1", profileId: "p1" });
+    const result = await runClassifyOnce({ note: { id: noteId, title: "X", frontmatter: {}, body: "x" }, llm, runId: "r1", profileId: "p1" });
     expect(result.action).toBe("error");
     expect(llm.complete).toHaveBeenCalledTimes(2);
     const db = getDb();
-    const errLog = db.prepare("SELECT * FROM classification_log WHERE note_id = 'n-5' AND action = 'error'").get();
+    const errLog = db.prepare("SELECT * FROM classification_log WHERE note_id = ? AND action = 'error'").get(noteId);
     expect(errLog).toBeTruthy();
   });
 });
@@ -2457,9 +2484,9 @@ describe("runClassifierBatch", () => {
 
   it("skips notes flagged classifier_skip = 1", async () => {
     createBin({ name: "Travel" });
-    seed("n-skip");
-    getDb().prepare("UPDATE vault_notes SET classifier_skip = 1 WHERE id = 'n-skip'").run();
-    seed("n-eligible");
+    const skipId = seed("note-skip");
+    getDb().prepare("UPDATE vault_notes SET classifier_skip = 1 WHERE id = ?").run(skipId);
+    seed("note-eligible");
     const summary = await runClassifierBatch({ trigger: "manual", llm: alwaysAssign("travel"), profileId: "p1", concurrency: 1, rateLimitRpm: 100, cap: 10, vaultPath: TEST_VAULT });
     expect(summary.notes_seen).toBe(1);
   });
@@ -2828,10 +2855,13 @@ function makeReq(body: unknown): Request {
 
 function setupProposal(): { proposalId: string; binId: string; noteId: string } {
   const bin = createBin({ name: "Travel" });
-  upsertVaultNote({ id: "n-1", vault_path: "n-1.md", title: "X", source: "obsidian", content_hash: "h", modified_at: nowIso(), frontmatter: {}, plain_text: "", excerpt: null, word_count: 0, tags: [] });
+  const note = upsertVaultNote({
+    vault_path: "note-a.md", title: "X", source: "obsidian",
+    source_id: null, source_url: null, content_hash: "h", modified_at: nowIso(),
+  });
   const runId = insertClassifierRun({ trigger: "manual" });
   const proposalId = insertProposal({
-    note_id: "n-1",
+    note_id: note.id,
     proposed_existing_bin_id: bin.id,
     existing_confidence: 0.5,
     proposed_new_bin_path: null,
@@ -2842,7 +2872,7 @@ function setupProposal(): { proposalId: string; binId: string; noteId: string } 
     profile_id: "p1",
     run_id: runId,
   });
-  return { proposalId, binId: bin.id, noteId: "n-1" };
+  return { proposalId, binId: bin.id, noteId: note.id };
 }
 
 describe("PATCH /api/classify/proposals/[id]", () => {
@@ -3041,29 +3071,35 @@ describe("POST /api/classify/auto/[id]/undo", () => {
   afterEach(() => { closeDb(); if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB); });
 
   it("removes the assignment and writes 'undone' row", async () => {
-    upsertVaultNote({ id: "n-1", vault_path: "n-1.md", title: "X", source: "obsidian", content_hash: "h", modified_at: nowIso(), frontmatter: {}, plain_text: "", excerpt: null, word_count: 0, tags: [] });
+    const note = upsertVaultNote({
+      vault_path: "note-a.md", title: "X", source: "obsidian",
+      source_id: null, source_url: null, content_hash: "h", modified_at: nowIso(),
+    });
     const bin = createBin({ name: "Travel" });
-    assignNoteToBin({ note_id: "n-1", bin_id: bin.id, assigned_by: "agent" });
+    assignNoteToBin({ note_id: note.id, bin_id: bin.id, assigned_by: "agent" });
     const runId = insertClassifierRun({ trigger: "manual" });
     const logId = insertLogRow({
-      note_id: "n-1", action: "auto_assign", bin_id: bin.id, new_bin_path: null,
+      note_id: note.id, action: "auto_assign", bin_id: bin.id, new_bin_path: null,
       existing_confidence: 0.9, new_bin_rating: null, reasoning: "r", model: "haiku",
       profile_id: "p1", run_id: runId, prior_log_id: null,
     });
     const res = await POST(new Request("http://localhost/", { method: "POST" }), { params: { id: logId } });
     expect(res.status).toBe(200);
     const db = getDb();
-    expect(db.prepare("SELECT 1 FROM note_bins WHERE note_id = 'n-1' AND bin_id = ?").get(bin.id)).toBeUndefined();
+    expect(db.prepare("SELECT 1 FROM note_bins WHERE note_id = ? AND bin_id = ?").get(note.id, bin.id)).toBeUndefined();
     expect(db.prepare("SELECT 1 FROM classification_log WHERE action = 'undone' AND prior_log_id = ?").get(logId)).toBeTruthy();
   });
 
   it("deletes auto-created bin if empty after undo", async () => {
-    upsertVaultNote({ id: "n-2", vault_path: "n-2.md", title: "X", source: "obsidian", content_hash: "h", modified_at: nowIso(), frontmatter: {}, plain_text: "", excerpt: null, word_count: 0, tags: [] });
+    const note = upsertVaultNote({
+      vault_path: "note-b.md", title: "X", source: "obsidian",
+      source_id: null, source_url: null, content_hash: "h", modified_at: nowIso(),
+    });
     const bin = createBin({ name: "AutoBin" });
-    assignNoteToBin({ note_id: "n-2", bin_id: bin.id, assigned_by: "agent" });
+    assignNoteToBin({ note_id: note.id, bin_id: bin.id, assigned_by: "agent" });
     const runId = insertClassifierRun({ trigger: "manual" });
     const logId = insertLogRow({
-      note_id: "n-2", action: "auto_create_bin", bin_id: bin.id, new_bin_path: "auto-bin",
+      note_id: note.id, action: "auto_create_bin", bin_id: bin.id, new_bin_path: "auto-bin",
       existing_confidence: null, new_bin_rating: 0.85, reasoning: "r", model: "haiku",
       profile_id: "p1", run_id: runId, prior_log_id: null,
     });
@@ -3148,20 +3184,26 @@ describe("PATCH /api/notes/[id]/classifier-skip", () => {
   afterEach(() => { closeDb(); if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB); });
 
   it("sets classifier_skip = 1 when skip:true", async () => {
-    upsertVaultNote({ id: "n-1", vault_path: "n-1.md", title: "X", source: "obsidian", content_hash: "h", modified_at: nowIso(), frontmatter: {}, plain_text: "", excerpt: null, word_count: 0, tags: [] });
+    const note = upsertVaultNote({
+      vault_path: "note-a.md", title: "X", source: "obsidian",
+      source_id: null, source_url: null, content_hash: "h", modified_at: nowIso(),
+    });
     const req = new Request("http://localhost/", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ skip: true }) });
-    const res = await PATCH(req, { params: { id: "n-1" } });
+    const res = await PATCH(req, { params: { id: note.id } });
     expect(res.status).toBe(200);
-    const row = getDb().prepare("SELECT classifier_skip FROM vault_notes WHERE id = 'n-1'").get() as { classifier_skip: number };
+    const row = getDb().prepare("SELECT classifier_skip FROM vault_notes WHERE id = ?").get(note.id) as { classifier_skip: number };
     expect(row.classifier_skip).toBe(1);
   });
 
   it("sets classifier_skip = 0 when skip:false", async () => {
-    upsertVaultNote({ id: "n-1", vault_path: "n-1.md", title: "X", source: "obsidian", content_hash: "h", modified_at: nowIso(), frontmatter: {}, plain_text: "", excerpt: null, word_count: 0, tags: [] });
-    getDb().prepare("UPDATE vault_notes SET classifier_skip = 1 WHERE id = 'n-1'").run();
+    const note = upsertVaultNote({
+      vault_path: "note-a.md", title: "X", source: "obsidian",
+      source_id: null, source_url: null, content_hash: "h", modified_at: nowIso(),
+    });
+    getDb().prepare("UPDATE vault_notes SET classifier_skip = 1 WHERE id = ?").run(note.id);
     const req = new Request("http://localhost/", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ skip: false }) });
-    await PATCH(req, { params: { id: "n-1" } });
-    const row = getDb().prepare("SELECT classifier_skip FROM vault_notes WHERE id = 'n-1'").get() as { classifier_skip: number };
+    await PATCH(req, { params: { id: note.id } });
+    const row = getDb().prepare("SELECT classifier_skip FROM vault_notes WHERE id = ?").get(note.id) as { classifier_skip: number };
     expect(row.classifier_skip).toBe(0);
   });
 });
@@ -3953,8 +3995,8 @@ import { useEffect, useState } from "react";
 interface Profile {
   id: string;
   name: string;
-  provider: string;
-  model: string;
+  type: string;
+  default_model: string;
 }
 
 interface SettingsState {
@@ -4019,7 +4061,7 @@ export function ClassifierSettings(): JSX.Element {
           >
             <option value="">(falls back to active chat profile)</option>
             {profiles.map((p) => (
-              <option key={p.id} value={p.id}>{p.name} — {p.model}</option>
+              <option key={p.id} value={p.id}>{p.name} — {p.default_model}</option>
             ))}
           </select>
         </label>
