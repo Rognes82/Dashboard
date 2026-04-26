@@ -133,3 +133,57 @@ See `docs/superpowers/specs/2026-04-11-command-center-dashboard-design.md` for t
 npm test           # Run once
 npm run test:watch # Watch mode
 ```
+
+## Auto-classifier (v1.3)
+
+The dashboard runs a classifier that places uncategorized notes into bins automatically.
+
+**How it works.** Every cron tick (default: 10 min) the classifier reads notes that have no bin assignments, asks the LLM to pick a best-fit bin from your existing tree, and either auto-assigns (when confidence ≥ 0.6) or queues a proposal in `/review`. New bins can be auto-created when the agent rates them ≥ 0.75 AND meaningfully better than the closest existing bin.
+
+**Settings.** Configure under Settings → Classifier:
+- `Profile`: which LLM profile to use (Haiku, Kimi, etc.). Falls back to active chat profile if unset.
+- `Cron interval`: minutes between automatic runs.
+- `Rate limit`: requests/minute (default 45 — under Anthropic tier-1's 50 RPM cap).
+- `Thresholds`: tune the auto-assign confidence and auto-create rating + margin gates.
+
+**Running on demand.** Click `Run classifier now` in `/review` after a big sync, or run `npm run classify` from the CLI.
+
+**Per-note control.**
+- Frontmatter `bins:` (plural array) on a note pre-assigns it AND tells the classifier to skip that note forever.
+- "Stop trying" button on any pending proposal flips the same flag.
+- 3 rejected proposals on the same note auto-flip the flag.
+
+**Disabling the classifier.** Clear the classify profile in Settings (set to `(falls back to active chat profile)` and also clear your active chat profile), or set `classify.cron_interval_min = 0` and don't trigger manually.
+
+### Manual smoke walkthrough
+
+Performed by the user, not automated. After deploying:
+
+1. Reset DB to clean state OR migrate an existing one:
+   `rm data/dashboard.db && npm run init-db` (or keep existing — migrate runs automatically)
+2. Seed bins via the UI: create at least 3 top-level bins with known content focus.
+3. Drop 5+ unbinned notes into the vault (e.g., manually create captures/foo.md files,
+   sync a few Notion pages, etc.) and run `npm run sync:vault` to index.
+4. Open `/review`. Pending Proposals + Recently Auto-Classified should be empty;
+   Last run summary shows "never run yet".
+5. Click "Run classifier now". Verify:
+   - Toast shows summary
+   - Both cards populate
+   - Auto-assigned notes appear with their assigned bin in /bins
+6. Right-click → reject one proposal. Verify it disappears and re-queues on next run.
+7. Reject the same note's proposal 3x. Verify `classifier_skip` flips and the note
+   no longer reappears in pending after manual runs.
+8. Trigger an auto-create scenario: write a note with content that doesn't fit any
+   existing bin, but with a clearly correct new-bin path. Verify a new bin is
+   created with the note in it.
+9. Click Undo on the auto-created assignment. Verify:
+   - Assignment removed
+   - Auto-created bin deleted (since now empty)
+   - Note returns to uncategorized state
+10. Add `bins: ["travel"]` to a note's frontmatter, save, run `npm run sync:vault`.
+    Verify `classifier_skip = 1` in the DB AND the bin assignment was applied.
+11. Concurrent-run guard: open two terminals; in one, run `npm run classify`; in the
+    other, click "Run classifier now" while the first is still running. Verify the
+    second gets a 409 / "already in flight" toast.
+12. Tune thresholds in Settings (e.g. `existing_min = 0.8`). Verify next run
+    queues more notes as pending.
