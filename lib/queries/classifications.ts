@@ -269,17 +269,19 @@ export function undoAutoClassification(logId: string): void {
   if (!row.note_id || !row.bin_id) throw new Error("log row missing note_id/bin_id; cannot undo");
   db.transaction(() => {
     db.prepare("DELETE FROM note_bins WHERE note_id = ? AND bin_id = ?").run(row.note_id, row.bin_id);
+    let binDeleted = false;
     if (row.action === "auto_create_bin") {
       const remaining = (db.prepare("SELECT COUNT(*) as n FROM note_bins WHERE bin_id = ?").get(row.bin_id) as { n: number }).n;
       if (remaining === 0) {
         db.prepare("DELETE FROM bins WHERE id = ?").run(row.bin_id);
+        binDeleted = true;
       }
     }
     db.prepare("UPDATE vault_notes SET classifier_attempts = classifier_attempts + 1 WHERE id = ?").run(row.note_id);
     insertLogRow({
       note_id: row.note_id,
       action: "undone",
-      bin_id: row.bin_id,
+      bin_id: binDeleted ? null : row.bin_id,
       new_bin_path: null,
       existing_confidence: null,
       new_bin_rating: null,
