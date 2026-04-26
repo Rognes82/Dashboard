@@ -26,3 +26,26 @@ export function resetDbForTesting(dbPath: string): Database.Database {
   closeDb();
   return getDb(dbPath);
 }
+
+const MIGRATION_FILE_RE = /^(\d+)-[\w-]+\.sql$/;
+
+export function migrate(db: Database.Database, dir?: string): void {
+  const migrationsDir = dir ?? path.join(process.cwd(), "migrations");
+  if (!fs.existsSync(migrationsDir)) return;
+  const files = fs
+    .readdirSync(migrationsDir)
+    .filter((f) => MIGRATION_FILE_RE.test(f))
+    .sort();
+  const current = db.pragma("user_version", { simple: true }) as number;
+  for (const f of files) {
+    const match = f.match(MIGRATION_FILE_RE);
+    if (!match) continue;
+    const n = parseInt(match[1], 10);
+    if (n <= current) continue;
+    const sql = fs.readFileSync(path.join(migrationsDir, f), "utf8");
+    db.transaction(() => {
+      db.exec(sql);
+      db.pragma(`user_version = ${n}`);
+    })();
+  }
+}
