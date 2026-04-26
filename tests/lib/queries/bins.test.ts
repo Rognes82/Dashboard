@@ -16,6 +16,7 @@ import {
   moveNoteBetweenBins,
   getBinDeletePreview,
   getBinMergePreview,
+  NoteNotInSourceBinError,
 } from "../../../lib/queries/bins";
 import { upsertVaultNote } from "../../../lib/queries/vault-notes";
 import { nowIso } from "../../../lib/utils";
@@ -292,6 +293,39 @@ describe("bins queries", () => {
     it("returns zero counts for empty bin", () => {
       const bin = createBin({ name: "Empty" });
       expect(getBinMergePreview(bin.id)).toEqual({ direct_child_count: 0, direct_note_count: 0 });
+    });
+  });
+
+  describe("NoteNotInSourceBinError", () => {
+    it("moveNoteBetweenBins throws NoteNotInSourceBinError when note not in source", () => {
+      const noteRow = upsertVaultNote({
+        vault_path: "test/typed-error.md", source: "obsidian",
+        source_id: null, source_url: null,
+        title: "T", content_hash: "h", modified_at: nowIso(),
+      });
+      const a = createBin({ name: "A" });
+      const b = createBin({ name: "B" });
+      expect(() => moveNoteBetweenBins(noteRow.id, a.id, b.id)).toThrow(NoteNotInSourceBinError);
+    });
+
+    it("NoteNotInSourceBinError carries noteId and fromBinId", () => {
+      const noteRow = upsertVaultNote({
+        vault_path: "test/typed-error-2.md", source: "obsidian",
+        source_id: null, source_url: null,
+        title: "T", content_hash: "h", modified_at: nowIso(),
+      });
+      const a = createBin({ name: "A" });
+      const b = createBin({ name: "B" });
+      try {
+        moveNoteBetweenBins(noteRow.id, a.id, b.id);
+        expect.fail("should have thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(NoteNotInSourceBinError);
+        if (err instanceof NoteNotInSourceBinError) {
+          expect(err.noteId).toBe(noteRow.id);
+          expect(err.fromBinId).toBe(a.id);
+        }
+      }
     });
   });
 });

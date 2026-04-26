@@ -2,6 +2,17 @@ import { getDb } from "../db";
 import { newId, nowIso } from "../utils";
 import type { Bin, BinNode, AssignedBy } from "../types";
 
+/**
+ * Thrown by moveNoteBetweenBins when the note isn't in the source bin.
+ * The API route checks `instanceof NoteNotInSourceBinError` to map it to a 400.
+ */
+export class NoteNotInSourceBinError extends Error {
+  constructor(public readonly noteId: string, public readonly fromBinId: string) {
+    super(`Note ${noteId} not in source bin ${fromBinId}`);
+    this.name = "NoteNotInSourceBinError";
+  }
+}
+
 export function createBin(input: {
   name: string;
   parent_bin_id?: string | null;
@@ -178,7 +189,7 @@ export function moveNoteBetweenBins(
     const inSource = db
       .prepare("SELECT 1 FROM note_bins WHERE note_id = ? AND bin_id = ? LIMIT 1")
       .get(noteId, fromBinId);
-    if (!inSource) throw new Error("note not in source bin");
+    if (!inSource) throw new NoteNotInSourceBinError(noteId, fromBinId);
     db.prepare("DELETE FROM note_bins WHERE note_id = ? AND bin_id = ?").run(noteId, fromBinId);
     db.prepare(
       `INSERT INTO note_bins (note_id, bin_id, assigned_at, assigned_by)
