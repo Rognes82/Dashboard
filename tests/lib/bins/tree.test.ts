@@ -59,4 +59,14 @@ describe("collectMatchingIds", () => {
     const out2 = new Set<string>();
     expect(collectMatchingIds([makeBin("a", "A")], "z", out2)).toBe(false);
   });
+  it("excludes non-matching sibling branches from output", () => {
+    // Tree: Root with two children — Alpha (matches) and Beta (doesn't).
+    // Expect: root + alpha in out, beta absent.
+    const root = makeBin("root", "Root", [makeBin("a", "Alpha"), makeBin("b", "Beta")]);
+    const out = new Set<string>();
+    collectMatchingIds([root], "alp", out);
+    expect(out.has("root")).toBe(true);
+    expect(out.has("a")).toBe(true);
+    expect(out.has("b")).toBe(false);
+  });
 });

@@ -4,10 +4,10 @@ import type { BinNode } from "../types";
  * Recursively find a bin in a tree by ID. Returns null if not found.
  */
 export function findBinById(bins: BinNode[], id: string): BinNode | null {
-  for (const b of bins) {
-    if (b.id === id) return b;
-    const c = b.children ? findBinById(b.children, id) : null;
-    if (c) return c;
+  for (const bin of bins) {
+    if (bin.id === id) return bin;
+    const found = findBinById(bin.children, id);
+    if (found) return found;
   }
   return null;
 }
