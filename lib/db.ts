@@ -12,7 +12,17 @@ export function getDb(dbPath?: string): Database.Database {
   dbInstance = new Database(resolvedPath);
   dbInstance.pragma("journal_mode = WAL");
   dbInstance.pragma("foreign_keys = ON");
-  migrate(dbInstance);
+  // Auto-migrate only if baseline schema is already loaded. On a fresh DB, the
+  // caller (init-db.ts or a test) will load schema first and then call migrate
+  // explicitly. This prevents migrations like ALTER TABLE vault_notes from
+  // running before vault_notes exists.
+  const hasUserTables =
+    (
+      dbInstance
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1")
+        .get() as { 1: number } | undefined
+    ) !== undefined;
+  if (hasUserTables) migrate(dbInstance);
   return dbInstance;
 }
 
