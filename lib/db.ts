@@ -12,6 +12,7 @@ export function getDb(dbPath?: string): Database.Database {
   dbInstance = new Database(resolvedPath);
   dbInstance.pragma("journal_mode = WAL");
   dbInstance.pragma("foreign_keys = ON");
+  migrate(dbInstance);
   return dbInstance;
 }
 
