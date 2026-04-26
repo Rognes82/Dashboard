@@ -35,7 +35,7 @@ export function migrate(db: Database.Database, dir?: string): void {
   const files = fs
     .readdirSync(migrationsDir)
     .filter((f) => MIGRATION_FILE_RE.test(f))
-    .sort();
+    .sort((a, b) => parseInt(a.match(MIGRATION_FILE_RE)![1], 10) - parseInt(b.match(MIGRATION_FILE_RE)![1], 10));
   const current = db.pragma("user_version", { simple: true }) as number;
   for (const f of files) {
     const match = f.match(MIGRATION_FILE_RE);
@@ -46,6 +46,6 @@ export function migrate(db: Database.Database, dir?: string): void {
     db.transaction(() => {
       db.exec(sql);
       db.pragma(`user_version = ${n}`);
-    })();
+    }).immediate();
   }
 }

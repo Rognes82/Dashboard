@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { resetDbForTesting, closeDb, migrate, getDb } from "../../lib/db";
+import { resetDbForTesting, closeDb, migrate } from "../../lib/db";
 import fs from "fs";
 import path from "path";
 
@@ -68,5 +68,24 @@ describe("migrate", () => {
     expect(db.pragma("user_version", { simple: true })).toBe(1);
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
     expect(tables.map((t) => t.name)).not.toContain("noise");
+  });
+
+  it("skips already-applied migrations and applies only new ones", () => {
+    setupMigrationsDir({ "001-foo.sql": "CREATE TABLE foo (id TEXT PRIMARY KEY);" });
+    const db = resetDbForTesting(TEST_DB);
+    migrate(db, MIG_DIR);
+    expect(db.pragma("user_version", { simple: true })).toBe(1);
+
+    setupMigrationsDir({
+      "001-foo.sql": "CREATE TABLE foo (id TEXT PRIMARY KEY);",
+      "002-bar.sql": "CREATE TABLE bar (id TEXT PRIMARY KEY);",
+    });
+    // If 001 were re-executed, it would throw "table foo already exists".
+    expect(() => migrate(db, MIG_DIR)).not.toThrow();
+    expect(db.pragma("user_version", { simple: true })).toBe(2);
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
+    const names = tables.map((t) => t.name);
+    expect(names).toContain("foo");
+    expect(names).toContain("bar");
   });
 });
