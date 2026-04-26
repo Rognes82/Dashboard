@@ -185,7 +185,8 @@ export function Sidebar({
                 const err = await res.json().catch(() => ({}));
                 throw new Error(err.error ?? `Move failed (${res.status})`);
               }
-              toast.show(`Moved '${moveBin.name}'`, "info");
+              const targetName = targetId ? findBinById(bins, targetId)?.name ?? "?" : "Top level";
+              toast.show(`Moved '${moveBin.name}' to '${targetName}'`, "info");
               setRefreshKey((k) => k + 1);
             } catch (e) {
               toast.show(e instanceof Error ? e.message : "Move failed", "error");
