@@ -22,11 +22,11 @@ local via settings.
 
 ## Current state (as of last session)
 
-**Branch:** `feature/thought-organizer-v12` — v1.2 (agent-first redesign) + v1.2.1 (manual bin management).
-**Tests:** 189 passing, lint clean, build clean.
-**Merged to main?** No. Phase 1 (v1.0) and Phase 2 (v1.1) are on main.
+**Branch:** `feature/v1.2.2-cleanup` — v1.2.2 cleanup release.
+**Tests:** 219 passing, lint clean, typecheck clean, build clean.
+**Merged to main?** v1.2 + v1.2.1 are on main as of `023742a`. v1.2.2 still on its branch — pending manual smoke + merge.
 **Deployed to Mac Mini?** Never. Still local-only on the MacBook.
-**Manual smoke pending?** v1.2.1 needs the user-driven smoke walkthrough listed in `docs/superpowers/plans/2026-04-25-manual-bin-management.md` Task 25 Step 5.
+**Manual smoke pending?** v1.2.2 needs the smoke walkthrough listed in `docs/superpowers/plans/2026-04-26-v122-cleanup.md` Task 21 Step 5.
 
 **What shipped in v1.2:**
 - Full UI redesign — chat-primary layout, persistent bin tree sidebar, dark gray +
@@ -50,12 +50,23 @@ local via settings.
 - Bug fix in `mergeBin` — re-parents source's children to target before deleting source (cascade was destroying them)
 - Cross-tree refresh signal via `dashboard-bins-mutated` CustomEvent so page lists update after sidebar drag mutations
 
-**Known v1.2.1 deferrals (handed off to v1.2.2 / v1.3):**
-- Multi-bin badge `·N` and Recent-view "Move to bin" both require extending `GET /api/notes` to include `bins[]` per note — wired but unfed (props exist, page doesn't supply data)
-- `findBinInTree` / `findBy` duplicate logic between Sidebar and BinPicker — extract to `lib/bins/tree.ts`
-- Merge-flow uses 4 separate state vars in Sidebar — consolidate into a discriminated union
-- `BinTree.tsx` is 433 lines — consider extracting `<SiblingList>` and `<NoteRow>` patterns into `components/bin-tree/`
-- Sort_order degenerate-gap guard — fine in practice but no escape hatch yet
+**What shipped in v1.2.2:**
+- `GET /api/notes?include=bins` opt-in branch + 2 new query helpers (`listVaultNotesWithBins`, `listVaultNotesByBinWithBins`) using LEFT JOIN + GROUP_CONCAT
+- Multi-bin badge `·N` and Recent-view "Move to bin" now actually work — both pages populate `noteBins` map
+- `lib/bins/tree.ts` shared utilities (`findBinById`, `collectMatchingIds`); replaces local copies in Sidebar, BinPicker, BinTree
+- `components/bin-tree/` directory replaces 430-line `components/BinTree.tsx`: BinTree.tsx (79 lines), BinRow.tsx (286), DropStrip.tsx (50), sort-order.ts (25), index.ts (re-export)
+- Sidebar merge state consolidated into `MergeFlow` discriminated union (`idle | picking | confirming`)
+- Server-side `sort_order` renumber: when sibling gap collapses below 1e-7, `updateBinSortOrder` renumbers via snapshot-then-iterate (not the broken correlated-UPDATE the plan first proposed — implementer caught it)
+- `NoteNotInSourceBinError` typed class replaces string-match in `/api/notes/[id]/move`; unknown errors now return 500 instead of 400
+- BinPicker keyboard navigation: ArrowUp/ArrowDown/Enter, scrollIntoView for selected row
+- Move toast: `Moved 'X' to 'Y'`. Remove toast: `Removed from 'binName'`.
+- Tests: 189 → 219 (+30 across 5 new test files)
+
+**Known v1.2.2 deferrals (out-of-scope per Q5 brainstorm):**
+- Picker tree a11y (`role="tree"` / `role="treeitem"` / `aria-expanded`)
+- Modal edge cases (zero focusable, single focusable)
+- ContextMenu arrow-key navigation
+- Client-side cycle detection during dragover (HTML5 limitation)
 
 ## User's vision that ISN'T built yet
 
@@ -71,7 +82,9 @@ auto-classify — idea-level extraction. Outside every spec written so far.
 
 ## Roadmap forward
 
-**v1.2.1 — Manual bin management UI** ✅ shipped (pending manual smoke). All 25 plan tasks complete on the same `feature/thought-organizer-v12` branch. Spec + plan in `docs/superpowers/{specs,plans}/2026-04-25-manual-bin-management-*.md`.
+**v1.2.1 — Manual bin management UI** ✅ shipped, merged to main at `023742a`. Spec + plan in `docs/superpowers/{specs,plans}/2026-04-25-manual-bin-management-*.md`.
+
+**v1.2.2 — Cleanup release** ✅ shipped on `feature/v1.2.2-cleanup` branch (pending manual smoke + merge). All 21 plan tasks complete. Spec + plan in `docs/superpowers/{specs,plans}/2026-04-26-v122-cleanup-design.md` and `docs/superpowers/plans/2026-04-26-v122-cleanup.md`.
 
 **v1.3 — Whole-note auto-classify** (scoped in original spec §9, ~2 weeks)
 - `scripts/agent-classify.ts` reads uncategorized notes, asks LLM to pick a bin
