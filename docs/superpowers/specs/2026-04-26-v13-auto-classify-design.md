@@ -82,10 +82,13 @@ scripts/agent-classify.ts
    │
    ├─ migrate(db)                       -- run pending migrations (idempotent)
    ├─ BEGIN IMMEDIATE                   -- writer lock, race-free
+   │     UPDATE classifier_runs SET finished_at = ?, error_message = 'orphan_recovered'
+   │       WHERE finished_at IS NULL AND started_at < (now - 30min)  -- orphan sweep
    │     SELECT count(*) FROM classifier_runs WHERE finished_at IS NULL
    │     IF > 0: ROLLBACK + abort with HTTP 409 / log "run-in-flight"
    │     INSERT classifier_runs (started_at, trigger, ...)
    │     COMMIT
+   │   (catch SQLITE_BUSY from BEGIN → same abort behavior as in-flight detection)
    ├─ query: SELECT notes WHERE
    │     id NOT IN (SELECT note_id FROM note_bins)   -- no bin assignments
    │     AND classifier_skip = 0
@@ -100,11 +103,12 @@ scripts/agent-classify.ts
    │     ├─ decide: apply Q1 threshold and Q3 gates (slugified path lookup)
    │     └─ commit (in transaction):
    │           ├─ auto_assign       → note_bins INSERT
-   │           ├─ auto_create_bin   → pre-flight SELECT id FROM bins WHERE
-   │           │                       parent_id=? AND slug=?; if exists,
-   │           │                       fall back to auto_assign at new-bin's
-   │           │                       rating; else bins INSERT + note_bins
-   │           │                       INSERT
+   │           ├─ auto_create_bin   → pre-flight SELECT id, name FROM bins
+   │           │                       WHERE parent_bin_id IS ?; JS-filter by
+   │           │                       slugify(name) === proposedSlug. If
+   │           │                       found, fall back to auto_assign at
+   │           │                       new-bin's rating; else bins INSERT +
+   │           │                       note_bins INSERT
    │           └─ pending           → classification_proposals INSERT
    │     └─ classification_log row written for every outcome
    ├─ UPDATE classifier_runs (finished_at, counts)
@@ -299,27 +303,65 @@ Contains all the `ALTER TABLE`, `CREATE TABLE IF NOT EXISTS`, and `CREATE INDEX 
 
 ### Path construction (load-bearing for decide logic)
 
-All path matching is on **slug paths**, not display names. Existing `bins.name` is arbitrary user text (`"Business Planning"`); existing `bins.slug` is URL-safe (`business-planning`, generated via the existing `slugify()` at `lib/utils.ts:24`).
+All path matching is on **slug paths**, not display names. The `bins` table has columns `id, name, parent_bin_id, source_seed, created_at, sort_order` — **no `slug` column**. Slugs are computed on demand from `bins.name` using the existing `slugify()` at `lib/utils.ts:24` (e.g. `"Business Planning"` → `"business-planning"`). No schema change needed; bin-tree lookup happens at run start and is cached for the batch.
 
 `lib/classify/paths.ts` exports:
 
 ```typescript
-// Build slugified path for a bin by walking parents.
-//   "Business Planning" / "OKRs" → "business-planning/okrs"
-function slugifyPath(bin: BinRow, allBins: BinRow[]): string;
+import { slugify } from '@/lib/utils';
 
-// Build the full lookup map used by decide.ts.
-function buildBinTree(allBins: BinRow[]): Map<string /*slugPath*/, string /*binId*/>;
+interface BinRow { id: string; name: string; parent_bin_id: string | null; /* … */ }
+
+// Build slugified path for a bin by walking parents up to root.
+//   bin "OKRs" with parent "Business Planning" → "business-planning/okrs"
+function slugifyPath(bin: BinRow, allBins: BinRow[]): string {
+  const segments: string[] = [];
+  let cur: BinRow | undefined = bin;
+  while (cur) {
+    const seg = slugify(cur.name);
+    if (!seg) return '';                 // any empty-slug ancestor → invalid path
+    segments.unshift(seg);
+    cur = cur.parent_bin_id
+      ? allBins.find((b) => b.id === cur!.parent_bin_id)
+      : undefined;
+  }
+  return segments.join('/');
+}
+
+// Build the full lookup map used by decide.ts. Skips bins whose name slugs to ''.
+function buildBinTree(allBins: BinRow[]): Map<string /*slugPath*/, string /*binId*/> {
+  const map = new Map<string, string>();
+  for (const bin of allBins) {
+    const path = slugifyPath(bin, allBins);
+    if (path) map.set(path, bin.id);
+  }
+  return map;
+}
 
 // Path utilities (used in decide logic):
-function parentOf(slugPath: string): string | null;  // "a/b/c" → "a/b"; "a" → null
-function tail(slugPath: string): string;             // "a/b/c" → "c"
+function parentOf(slugPath: string): string | null;   // "a/b/c" → "a/b"; "a" → null
+function tail(slugPath: string): string;              // "a/b/c" → "c"
 
-// Defensive normalization on LLM-returned paths (lowercase + trim + collapse slashes).
-function normalizeLlmPath(raw: string): string;
+// Defensive normalization on LLM-returned paths.
+//   - lowercase, trim, collapse slashes
+//   - segment-wise slugify so spaced/title-cased paths are recoverable
+//     ("Business Planning/OKRs" → "business-planning/okrs")
+//   - drops empty segments
+function normalizeLlmPath(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/\/+/g, '/')
+    .replace(/^\//, '')
+    .replace(/\/$/, '')
+    .split('/')
+    .map((s) => slugify(s))
+    .filter((s) => s.length > 0)
+    .join('/');
+}
 ```
 
-The prompt's bin-tree block is rendered using slug paths so the LLM has only one canonical form to echo back. The decide logic treats `existing.bin_path` and `proposed_new_bin.path` as already-slugified, but applies `normalizeLlmPath` defensively before lookup.
+The prompt's bin-tree block is rendered using slug paths so the LLM sees one canonical form. Even so, models occasionally produce title-cased or spaced paths despite instructions; `normalizeLlmPath` recovers from those without needing a JSON retry. The decide logic always normalizes both `existing.bin_path` and `proposed_new_bin.path` before lookup.
 
 ### System prompt template
 
@@ -362,16 +404,15 @@ The note content with `bins` stripped from frontmatter (already used for overrid
 ### Output schema (zod)
 
 ```typescript
-const PathRe = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/;
 const ClassifierOutput = z.object({
   existing_match: z.object({
-    bin_path: z.string().regex(PathRe),
+    bin_path: z.string().min(1),         // structurally non-empty; normalize before lookup
     confidence: z.number().min(0).max(1),
     reasoning: z.string().min(1),
   }),
   proposed_new_bin: z
     .object({
-      path: z.string().regex(PathRe),
+      path: z.string().min(1),
       rating: z.number().min(0).max(1),
       reasoning: z.string().min(1),
     })
@@ -379,6 +420,8 @@ const ClassifierOutput = z.object({
   no_fit_reasoning: z.string().nullable(),
 });
 ```
+
+Path strings are validated as non-empty only. The strict slug regex moved out of zod and into `normalizeLlmPath` (which is forgiving — it slugifies segment-wise and recovers spaced/title-cased paths). After normalization, if the result is empty or doesn't match a bin in `binTree`, the decide logic treats confidence as 0 (the existing hallucination case). This trades a strict schema for better recovery — fewer JSON-retries, more notes successfully classified per run.
 
 ### Decide logic (`lib/classify/decide.ts`)
 
@@ -410,7 +453,7 @@ if new is not null:
      AND parentExists:
     return { action: 'auto_create_bin',
              path: new.path,
-             parent_id: binTree.get(parentOf(new.path)),
+             parent_bin_id: binTree.get(parentOf(new.path)),
              slug: tail(new.path),
              name: titleCase(tail(new.path)) }
   // else fall through with new-bin recorded as pending payload
@@ -435,15 +478,30 @@ return { action: 'pending',
 
 The decide function computes `auto_create_bin` from the run-start `binTree` snapshot. With concurrency 3, a second note in the same batch may decide to create the same path. To prevent duplicate bin rows, the commit step for `auto_create_bin` does:
 
-```sql
-BEGIN;
-SELECT id FROM bins WHERE parent_id = ? AND slug = ?;
--- If found: skip the bin INSERT, treat as auto_assign at new.rating, log accordingly.
--- If not found: INSERT bins ... + INSERT note_bins ... as planned.
-COMMIT;
+```typescript
+// Pseudocode — runs inside db.transaction()
+const candidates = db
+  .prepare('SELECT id, name FROM bins WHERE parent_bin_id IS ?')
+  .all(parentBinId) as { id: string; name: string }[];
+
+const existing = candidates.find((c) => slugify(c.name) === proposedSlug);
+
+if (existing) {
+  // Bin was created by another note in the same batch (or pre-existed).
+  // Convert to auto_assign at new.rating; log with `note: 'duplicate_path_at_commit'`.
+  insertNoteBin(existing.id);
+} else {
+  // INSERT bins (id, name, parent_bin_id, ...) + INSERT note_bins as planned.
+  insertNewBin();
+  insertNoteBin(newBinId);
+}
 ```
 
-This means the in-memory `binTree` may be stale during a batch but the DB is the source of truth at commit time. Cheap (one extra SELECT per auto_create) and race-free.
+Notes:
+- **No `slug` column to query against.** We fetch all candidate children of `parentBinId` and JS-filter by `slugify(name) === proposedSlug`. Existing index `idx_bins_parent` covers the parent lookup; with typical bin trees (<10 children/parent) the filter is trivial.
+- The transaction guarantees atomicity within a single process; SQLite WAL serializes writes across processes, so a concurrent run from another process will see the committed bin on its next SELECT.
+
+This means the in-memory `binTree` may be stale during a batch but the DB is the source of truth at commit time.
 
 ### Edge-case handling
 
@@ -451,10 +509,11 @@ This means the in-memory `binTree` may be stale during a batch but the DB is the
 |------|----------|
 | `existing.bin_path` doesn't resolve to any DB bin (after `normalizeLlmPath`) | Treat confidence as 0; route to pending |
 | `proposed_new_bin.path` parent doesn't exist | Auto-create gate fails; queue as new-bin proposal (user can edit path on accept to chain creation) |
-| `proposed_new_bin.path` already exists in DB | Step (1) of decide: convert silently to existing-bin assignment at the new-bin's rating |
+| `proposed_new_bin.path` already exists in DB (after normalization) | Step (1) of decide: convert silently to existing-bin assignment at the new-bin's rating |
 | `no_fit_reasoning` non-null AND existing.confidence high | Trust the explicit signal — route to pending with reasoning shown |
-| LLM returns title-cased / spaced path despite the prompt | `normalizeLlmPath` lowercases + trims + collapses internal whitespace to `-`; if the result still doesn't match a bin, treated as hallucination (confidence 0) |
-| Two notes in same batch propose same new-bin path | First commit creates the bin; second commit's pre-flight SELECT finds it and converts to auto_assign (see "Pre-flight commit check" above) |
+| LLM returns title-cased / spaced path despite the prompt | `normalizeLlmPath` segment-wise slugifies — `"Business Planning/OKRs"` → `"business-planning/okrs"` — recovering without a JSON retry. If result is empty, treated as hallucination (confidence 0). |
+| Two notes in same batch propose same new-bin path | First commit creates the bin; second commit's pre-flight SELECT finds it via `slugify(name)` filter and converts to auto_assign (see "Pre-flight commit check" above) |
+| Bin name slugifies to empty string (e.g. user named a bin `"!!!"`) | `buildBinTree` skips it; not addressable by the classifier. User can still see/use the bin via the existing UI. |
 
 ---
 
@@ -568,8 +627,11 @@ Last run: 10 min ago (12 seen / 9 auto / 3 pending / 0 errored)
 | Profile deleted | Fall back to active chat profile; if that's also gone → abort run with clear error |
 | Machine-key missing | Abort run with re-key-needed error (shared issue with chat API) |
 | Concurrent runs | `BEGIN IMMEDIATE` writer-lock around in-flight check + INSERT; second run sees the existing unfinished row, ROLLBACK, abort with HTTP 409 (manual) or silent exit (cron). Race-free across processes under WAL. |
+| `BEGIN IMMEDIATE` hits busy_timeout (process A holds lock too long) | Catch `SQLITE_BUSY` from the BEGIN call; map to the same concurrent-run abort path (HTTP 409 / silent cron exit). Do not treat as catastrophic. |
+| Orphan run row (process crashed leaving `finished_at IS NULL`) | At run start, inside the `BEGIN IMMEDIATE` transaction, force-finish orphan rows older than 30 minutes: `UPDATE classifier_runs SET finished_at = ?, error_message = 'orphan_recovered' WHERE finished_at IS NULL AND started_at < (now - 30min)`. Run normally afterward. Without this, a single crash would wedge the classifier permanently. |
 | LLM hallucinates path that resolves to no bin AND no valid parent | Falls through both gates → routes to pending with hallucinated path stored in `proposed_new_bin_path` for user to inspect; user can Edit Path on accept |
-| Two notes in same batch propose same new-bin path | Second note's commit-time pre-flight SELECT finds the bin created by the first note → converts to auto_assign at second note's rating; no duplicate row |
+| Two notes in same batch propose same new-bin path | Second note's commit-time pre-flight SELECT finds the bin (via `slugify(name)` filter) created by the first note → converts to auto_assign at second note's rating; no duplicate row |
+| LLM returns spaced or title-cased path | `normalizeLlmPath` segment-wise slugifies; recovered without a JSON retry |
 | Cost runaway | Per-run cap of 100 notes; excess waits for next cron tick (worst case ≈ 600 classifications/hour at 10-min interval, ≈ $0.05/hr at Haiku rates) |
 | Classifier loop | 3-strikes auto-skip via `classifier_attempts`; manual "Stop trying" anytime |
 | Empty bin tree | Returns new-bin proposals for everything; nothing breaks |
