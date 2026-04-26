@@ -22,11 +22,13 @@ local via settings.
 
 ## Current state (as of last session)
 
-**Branch:** `feature/v1.2.2-cleanup` — v1.2.2 cleanup release.
+**Branch:** `main` — v1.2 + v1.2.1 + v1.2.2 all merged and pushed (`8027b02`).
 **Tests:** 219 passing, lint clean, typecheck clean, build clean.
-**Merged to main?** v1.2 + v1.2.1 are on main as of `023742a`. v1.2.2 still on its branch — pending manual smoke + merge.
+**Merged to main?** Yes — pushed to origin. `feature/v1.2.2-cleanup` branch deleted post-merge.
 **Deployed to Mac Mini?** Never. Still local-only on the MacBook.
-**Manual smoke pending?** v1.2.2 needs the smoke walkthrough listed in `docs/superpowers/plans/2026-04-26-v122-cleanup.md` Task 21 Step 5.
+**Manual smoke pending?** v1.2.1 + v1.2.2 user-driven smoke walkthroughs in their respective plans (`docs/superpowers/plans/2026-04-25-manual-bin-management.md` Task 25, `docs/superpowers/plans/2026-04-26-v122-cleanup.md` Task 21). User has not yet run them but everything is committed and gates pass.
+
+**v1.3 brainstorm in progress.** Just asked Q1 (auto-assign vs propose-and-approve vs hybrid-by-confidence). Recommendation was **C — hybrid with 0.9 confidence threshold**: agent assigns automatically when confident, queues a proposal otherwise. User clearing context before answering Q1 — re-pose the question fresh after clear.
 
 **What shipped in v1.2:**
 - Full UI redesign — chat-primary layout, persistent bin tree sidebar, dark gray +
