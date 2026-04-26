@@ -11,7 +11,7 @@
 v1.2.1 shipped manual bin management end-to-end — every API, every UI flow, every modal. Code review during execution surfaced a small set of loose ends that don't block users today but compound at v1.3 (auto-classify) time:
 
 - `noteBins` props are wired through NoteList but never populated by the pages — the multi-bin badge `·N` and the Recent-view "Move to bin" context-menu item are dead code.
-- `findBinInTree` (Sidebar) and `findBy` (BinPicker) are byte-identical functions in two files. v1.3 will add a third caller (the classifier review modal) and we'd be duplicating again.
+- `findBinInTree` (Sidebar) and `findBy` (BinPicker) are semantically identical functions in two files (argument order differs: `findBinInTree(bins, id)` vs `findBy(id, list)`). v1.3 will add a third caller (the classifier review modal) and we'd be duplicating again.
 - Sidebar's merge flow uses 4 separate state vars that have to be cleared together; impossible states (target without source) are representable.
 - `BinTree.tsx` is 433 lines covering 5 distinct concerns — fine today, painful when v1.3 needs to add classifier-proposed-bin badges to BinRow.
 - `sort_order` averaging on drag-reorder works at 50-reorder scale but has no escape hatch for precision collapse.
@@ -280,12 +280,12 @@ export function collectMatchingIds(bins: BinNode[], q: string, out: Set<string>)
 }
 ```
 
-(Moved from `components/BinTree.tsx` essentially as-is. The `qLower` propagation through recursion was already correct in the existing code.)
+(Moved from `components/BinTree.tsx`. Extracted version passes `qLower` to recursive calls instead of `q`, eliminating redundant `toLowerCase()` calls in deep recursion. Behavior is identical because `toLowerCase()` is idempotent.)
 
 ### 5.2 BinPicker uses the shared util
 
 In `components/BinPicker.tsx`:
-- Delete `findBy` (lines ~36-44 of current file).
+- Delete `findBy` (lines ~36-44 of current file). **Note the argument order swap:** existing call sites use `findBy(id, bins)` but the new shared helper is `findBinById(bins, id)` — flip args at every call site (typically inside `excludeIds.forEach((id) => findBinById(bins, id))`).
 - Delete `childContainsMatch` (lines ~159-163).
 - Import `findBinById, collectMatchingIds` from `@/lib/bins/tree`.
 - Pre-compute `visibleIds` once (when `filter` is non-empty) using `collectMatchingIds`, then `<PickableTree>` checks `visibleIds.has(b.id)` instead of recursively calling `childContainsMatch` on every render.
@@ -377,7 +377,7 @@ Each new file owns one concern. Imports between them are local (`./BinRow`, `./D
 In `lib/queries/bins.ts`:
 
 ```ts
-const RENUMBER_GAP_THRESHOLD = 0.001;
+const RENUMBER_GAP_THRESHOLD = 1e-7;
 
 /**
  * Atomically updates a bin's sort_order (and optionally parent_bin_id) and
@@ -458,7 +458,12 @@ The `merge_into` branch and DELETE seeded-bin guard are unaffected.
 
 ### 6.3 Threshold rationale
 
-`RENUMBER_GAP_THRESHOLD = 0.001`. Conservative — JavaScript doubles have ~15 decimal digits of precision; even 50 reorders in the same gap won't get within 1e-12 of zero. The 0.001 threshold catches collapse well before precision would actually fail. Lowering it gains nothing; raising it triggers renumbers more often than necessary but doesn't break correctness.
+`RENUMBER_GAP_THRESHOLD = 1e-7`. Balances two failure modes:
+
+- **Too high** (e.g., 0.001): renumbers fire after ~20 reorders into the same gap (each halving 1000 → 500 → 250 → ... → 0.0009 takes log2(1000/0.001) ≈ 20 steps). For a user actively reordering bins, 20 drags into the same slot is a realistic session — extra silent UPDATEs aren't broken but they're wasteful.
+- **Too low** (e.g., 1e-12): only fires at actual precision-loss territory. By the time the gap is that small, intermediate `(prev + before) / 2` results may equal one of the endpoints, making the next reorder a silent no-op.
+
+`1e-7` sits comfortably between: ~33 halvings of a 1000 starting gap (effectively never reached in normal use) but still ~5 orders of magnitude above IEEE-754 double precision for numbers in the 1000 range. Lowering further gains nothing; raising it triggers renumbers earlier than necessary but doesn't break correctness.
 
 ### 6.4 Behavior
 
@@ -471,7 +476,7 @@ The `merge_into` branch and DELETE seeded-bin guard are unaffected.
 Extend `tests/lib/queries/bins.test.ts` with `describe("updateBinSortOrder gap renumber", ...)`:
 
 1. **No renumber when gap is healthy.** Insert 3 siblings at 1000, 2000, 3000. Update middle to 1500. Expect final sort_orders to be [1000, 1500, 3000] (no renumber fired).
-2. **Renumber when gap collapses.** Insert 3 siblings at 1000, 1000.0005, 1000.001. Update middle to 1000.0006 (gap < 0.001). Expect final sort_orders to be integer multiples of 1000 (1000, 2000, 3000) with relative order preserved.
+2. **Renumber when gap collapses.** Insert 3 siblings at 1000, 1000.00000005, 1000.0000001. Update middle to 1000.00000006 (gap < 1e-7). Expect final sort_orders to be integer multiples of 1000 (1000, 2000, 3000) with relative order preserved.
 3. **Single-child case.** Only one sibling under parent. Update sort_order. `min_gap` is null → no renumber, no error.
 4. **Tiebreaker on equal sort_order.** Force two siblings to identical sort_order via raw SQL. Trigger a renumber by writing a third value that collapses a gap. Both originally-tied bins get distinct values; the lower-`id` one comes first.
 
@@ -671,7 +676,7 @@ v1.2.2 is done when all of these are true:
 5. ☐ Sidebar merge state is a single `MergeFlow` discriminated union; impossible states unrepresentable
 6. ☐ `components/bin-tree/` exists with the 4 files + index.ts; `components/BinTree.tsx` deleted
 7. ☐ `components/Sidebar.tsx` imports BinTree from `./bin-tree` (or `./bin-tree/index`)
-8. ☐ Sort-order PATCH transparently renumbers when sibling gap collapses below 0.001
+8. ☐ Sort-order PATCH transparently renumbers when sibling gap collapses below 1e-7
 9. ☐ `NoteNotInSourceBinError` typed class used end-to-end (throw in query, `instanceof` in route)
 10. ☐ BinPicker supports ArrowUp / ArrowDown / Enter for keyboard navigation
 11. ☐ Move-bin toast says `Moved 'X' to 'Y'`; Remove-from-bin toast says `Removed from 'binName'`
