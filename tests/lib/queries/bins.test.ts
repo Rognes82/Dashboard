@@ -17,6 +17,7 @@ import {
   getBinDeletePreview,
   getBinMergePreview,
   NoteNotInSourceBinError,
+  updateBinSortOrder,
 } from "../../../lib/queries/bins";
 import { upsertVaultNote } from "../../../lib/queries/vault-notes";
 import { nowIso } from "../../../lib/utils";
@@ -293,6 +294,63 @@ describe("bins queries", () => {
     it("returns zero counts for empty bin", () => {
       const bin = createBin({ name: "Empty" });
       expect(getBinMergePreview(bin.id)).toEqual({ direct_child_count: 0, direct_note_count: 0 });
+    });
+  });
+
+  describe("updateBinSortOrder gap renumber", () => {
+    it("does not renumber when gap is healthy", () => {
+      const a = createBin({ name: "A", sort_order: 1000 });
+      const b = createBin({ name: "B", sort_order: 2000 });
+      const c = createBin({ name: "C", sort_order: 3000 });
+      updateBinSortOrder(b.id, { sort_order: 1500 });
+      expect(getBinById(a.id)?.sort_order).toBe(1000);
+      expect(getBinById(b.id)?.sort_order).toBe(1500);
+      expect(getBinById(c.id)?.sort_order).toBe(3000);
+    });
+
+    it("renumbers when gap collapses below threshold", () => {
+      const a = createBin({ name: "A", sort_order: 1000 });
+      const b = createBin({ name: "B", sort_order: 1000.00000005 });
+      const c = createBin({ name: "C", sort_order: 1000.0000001 });
+      updateBinSortOrder(b.id, { sort_order: 1000.00000006 });
+      // Renumber should have fired — values become integer multiples of 1000
+      expect(getBinById(a.id)?.sort_order).toBe(1000);
+      expect(getBinById(b.id)?.sort_order).toBe(2000);
+      expect(getBinById(c.id)?.sort_order).toBe(3000);
+    });
+
+    it("does not error on single-child case (no gap to measure)", () => {
+      const parent = createBin({ name: "P" });
+      const only = createBin({ name: "Only", parent_bin_id: parent.id, sort_order: 0 });
+      expect(() => updateBinSortOrder(only.id, { sort_order: 500 })).not.toThrow();
+      expect(getBinById(only.id)?.sort_order).toBe(500);
+    });
+
+    it("preserves relative order with id tiebreaker on equal sort_order", () => {
+      // Force two bins to identical sort_order via createBin.
+      // ULIDs are time-sorted so first-created has lower id.
+      const a = createBin({ name: "A", sort_order: 1000 });
+      const b = createBin({ name: "B", sort_order: 1000 });
+      const c = createBin({ name: "C", sort_order: 1000.00000001 });
+      // Trigger renumber by writing a value that collapses a gap
+      updateBinSortOrder(c.id, { sort_order: 1000.00000002 });
+      // After renumber, both originally-tied bins get distinct values; lower-id first.
+      const aSort = getBinById(a.id)?.sort_order ?? 0;
+      const bSort = getBinById(b.id)?.sort_order ?? 0;
+      const cSort = getBinById(c.id)?.sort_order ?? 0;
+      expect(aSort).toBeLessThan(bSort);
+      expect(bSort).toBeLessThan(cSort);
+      // Distinct values
+      expect(new Set([aSort, bSort, cSort]).size).toBe(3);
+    });
+
+    it("supports re-parent + sort_order in same call", () => {
+      const oldParent = createBin({ name: "Old" });
+      const newParent = createBin({ name: "New" });
+      const child = createBin({ name: "C", parent_bin_id: oldParent.id, sort_order: 0 });
+      updateBinSortOrder(child.id, { sort_order: 5000, parent_bin_id: newParent.id });
+      expect(getBinById(child.id)?.parent_bin_id).toBe(newParent.id);
+      expect(getBinById(child.id)?.sort_order).toBe(5000);
     });
   });
 

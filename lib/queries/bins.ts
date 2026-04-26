@@ -265,3 +265,63 @@ export function getBinMergePreview(id: string): BinMergePreview {
     .get(id) as { n: number };
   return { direct_child_count: c.n, direct_note_count: n.n };
 }
+
+const RENUMBER_GAP_THRESHOLD = 1e-7;
+
+/**
+ * Atomically updates a bin's sort_order (and optionally parent_bin_id) and
+ * triggers a renumber of the affected parent's children if the smallest sibling
+ * gap drops below RENUMBER_GAP_THRESHOLD. Renumbers preserve relative order
+ * using (sort_order, id) as the ordering key.
+ */
+export function updateBinSortOrder(
+  id: string,
+  input: { sort_order: number; parent_bin_id?: string | null }
+): Bin | null {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const existing = getBinById(id);
+    if (!existing) return null;
+
+    const newParent = input.parent_bin_id === undefined
+      ? existing.parent_bin_id
+      : input.parent_bin_id;
+
+    db.prepare(
+      "UPDATE bins SET sort_order = ?, parent_bin_id = ? WHERE id = ?"
+    ).run(input.sort_order, newParent, id);
+
+    // Find smallest gap among siblings under the (new) parent.
+    // The double-? for parent is the standard better-sqlite3 pattern for
+    // nullable parameters in WHERE clauses.
+    const gapRow = db.prepare(
+      `WITH ordered AS (
+         SELECT sort_order,
+                LAG(sort_order) OVER (ORDER BY sort_order, id) AS prev
+         FROM bins
+         WHERE (parent_bin_id IS ? OR (parent_bin_id IS NULL AND ? IS NULL))
+       )
+       SELECT MIN(sort_order - prev) AS min_gap
+       FROM ordered WHERE prev IS NOT NULL`
+    ).get(newParent, newParent) as { min_gap: number | null };
+
+    if (gapRow.min_gap !== null && gapRow.min_gap < RENUMBER_GAP_THRESHOLD) {
+      // Renumber to clean 1000-spaced values, preserving (sort_order, id) order.
+      // Materialize new values FIRST (snapshot) so per-row UPDATE evaluations
+      // don't see the table mutating mid-flight and shift ROW_NUMBER results.
+      const newOrders = db.prepare(
+        `SELECT id AS bid, ROW_NUMBER() OVER (ORDER BY sort_order, id) * 1000.0 AS new_order
+         FROM bins
+         WHERE (parent_bin_id IS ? OR (parent_bin_id IS NULL AND ? IS NULL))`
+      ).all(newParent, newParent) as { bid: string; new_order: number }[];
+
+      const updateOne = db.prepare("UPDATE bins SET sort_order = ? WHERE id = ?");
+      for (const row of newOrders) {
+        updateOne.run(row.new_order, row.bid);
+      }
+    }
+
+    return getBinById(id);
+  });
+  return tx();
+}
