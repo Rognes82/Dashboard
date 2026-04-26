@@ -119,6 +119,50 @@ export function listVaultNotesByBin(bin_id: string, limit = 500): VaultNote[] {
     .all(bin_id, limit) as VaultNote[];
 }
 
+function buildNotesWithBinsRows(rows: Array<VaultNote & { bin_ids: string | null }>): Array<VaultNote & { bins: string[] }> {
+  return rows.map(({ bin_ids, ...note }) => ({
+    ...(note as VaultNote),
+    bins: bin_ids ? bin_ids.split(",").sort() : [],
+  }));
+}
+
+/**
+ * Like listVaultNotes(limit) but each note includes its assigned bin IDs.
+ */
+export function listVaultNotesWithBins(limit = 200): Array<VaultNote & { bins: string[] }> {
+  const rows = getDb()
+    .prepare(
+      `SELECT vn.*, GROUP_CONCAT(nb.bin_id) AS bin_ids
+       FROM vault_notes vn
+       LEFT JOIN note_bins nb ON nb.note_id = vn.id
+       WHERE vn.deleted_at IS NULL
+       GROUP BY vn.id
+       ORDER BY vn.modified_at DESC
+       LIMIT ?`
+    )
+    .all(limit) as Array<VaultNote & { bin_ids: string | null }>;
+  return buildNotesWithBinsRows(rows);
+}
+
+/**
+ * Like listVaultNotesByBin(binId, limit) but each note includes its assigned bin IDs.
+ */
+export function listVaultNotesByBinWithBins(bin_id: string, limit = 500): Array<VaultNote & { bins: string[] }> {
+  const rows = getDb()
+    .prepare(
+      `SELECT vn.*, GROUP_CONCAT(nb.bin_id) AS bin_ids
+       FROM vault_notes vn
+       LEFT JOIN note_bins nb ON nb.note_id = vn.id
+       WHERE vn.deleted_at IS NULL
+         AND vn.id IN (SELECT note_id FROM note_bins WHERE bin_id = ?)
+       GROUP BY vn.id
+       ORDER BY vn.modified_at DESC
+       LIMIT ?`
+    )
+    .all(bin_id, limit) as Array<VaultNote & { bin_ids: string | null }>;
+  return buildNotesWithBinsRows(rows);
+}
+
 export function listRecentVaultNotes(hours = 24, limit = 100): VaultNote[] {
   const cutoff = new Date(Date.now() - hours * 3600_000).toISOString();
   return getDb()
