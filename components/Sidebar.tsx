@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { BinNode, SyncStatusRecord } from "@/lib/types";
+import { findBinById } from "@/lib/bins/tree";
 import { BinTree } from "./BinTree";
 import { CreateBinModal } from "./CreateBinModal";
 import { BinPicker } from "./BinPicker";
@@ -206,7 +207,7 @@ export function Sidebar({
           excludeIds={[mergeBinSource.id]}
           onPick={(targetId) => {
             if (!targetId) return;
-            const target = findBinInTree(bins, targetId);
+            const target = findBinById(bins, targetId);
             setMergeTargetId(targetId);
             setMergeTargetName(target?.name ?? "?");
             setMergePickerOpen(false);
@@ -256,11 +257,3 @@ function relTime(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function findBinInTree(bins: BinNode[], id: string): BinNode | null {
-  for (const b of bins) {
-    if (b.id === id) return b;
-    const c = b.children ? findBinInTree(b.children, id) : null;
-    if (c) return c;
-  }
-  return null;
-}
