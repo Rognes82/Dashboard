@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getBinById, updateBin, deleteBin, mergeBin, isDescendantOf } from "@/lib/queries/bins";
+import { getBinById, updateBin, deleteBin, mergeBin, isDescendantOf, updateBinSortOrder } from "@/lib/queries/bins";
 import { badRequest, isNonEmptyString, isOptionalString, readJson } from "@/lib/validation";
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
@@ -27,6 +27,16 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (isDescendantOf(b.parent_bin_id, params.id)) {
       return badRequest("bin cannot be a child of its own descendant");
     }
+  }
+
+  // Sort_order changes go through the renumber-aware path. Other PATCH paths
+  // (rename, re-parent without sort) skip this and use the default updateBin.
+  if (b.sort_order !== undefined && typeof b.sort_order === "number") {
+    const updated = updateBinSortOrder(params.id, {
+      sort_order: b.sort_order,
+      parent_bin_id: b.parent_bin_id === undefined ? undefined : (b.parent_bin_id as string | null),
+    });
+    return NextResponse.json({ bin: updated });
   }
 
   const updated = updateBin(params.id, {
