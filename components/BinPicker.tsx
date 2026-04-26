@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Modal, ModalFooter } from "./Modal";
 import type { BinNode } from "@/lib/types";
+import { findBinById, collectMatchingIds } from "@/lib/bins/tree";
 
 interface BinPickerProps {
   open: boolean;
@@ -33,23 +34,26 @@ export function BinPicker({
   }, [open]);
 
   // Compute the full set of excluded IDs including descendants of `excludeIds`
-  const excludedSet = new Set<string>();
-  function walk(node: BinNode) {
-    excludedSet.add(node.id);
-    node.children?.forEach(walk);
-  }
-  function findBy(id: string, list: BinNode[]): BinNode | null {
-    for (const b of list) {
-      if (b.id === id) return b;
-      const c = b.children ? findBy(id, b.children) : null;
-      if (c) return c;
+  const excludedSet = useMemo(() => {
+    const out = new Set<string>();
+    function walk(node: BinNode) {
+      out.add(node.id);
+      node.children?.forEach(walk);
     }
-    return null;
-  }
-  excludeIds.forEach((id) => {
-    const node = findBy(id, bins);
-    if (node) walk(node);
-  });
+    excludeIds.forEach((id) => {
+      const node = findBinById(bins, id);
+      if (node) walk(node);
+    });
+    return out;
+  }, [bins, excludeIds]);
+
+  const visibleIds = useMemo(() => {
+    const q = filter.trim();
+    if (!q) return null;
+    const out = new Set<string>();
+    collectMatchingIds(bins, q, out);
+    return out;
+  }, [bins, filter]);
 
   return (
     <Modal open={open} onClose={onClose} title={title} size="md">
@@ -81,7 +85,7 @@ export function BinPicker({
             excludedSet={excludedSet}
             alreadyInIds={alreadyInIds}
             disableAlreadyIn={disableAlreadyIn}
-            filter={filter}
+            visibleIds={visibleIds}
           />
         )}
       </div>
@@ -108,23 +112,20 @@ interface PickableTreeProps {
   excludedSet: Set<string>;
   alreadyInIds: string[];
   disableAlreadyIn: boolean;
-  filter: string;
+  visibleIds: Set<string> | null;
   depth?: number;
 }
 
-function PickableTree({ bins, selectedId, onSelect, excludedSet, alreadyInIds, disableAlreadyIn, filter, depth = 0 }: PickableTreeProps) {
-  const q = filter.trim().toLowerCase();
+function PickableTree({ bins, selectedId, onSelect, excludedSet, alreadyInIds, disableAlreadyIn, visibleIds, depth = 0 }: PickableTreeProps) {
   return (
     <ul>
       {bins.map((b) => {
-        const matches = !q || b.name.toLowerCase().includes(q);
+        if (visibleIds && !visibleIds.has(b.id)) return null;
         const childrenRender = b.children && b.children.length > 0
           ? <PickableTree bins={b.children} selectedId={selectedId} onSelect={onSelect}
               excludedSet={excludedSet} alreadyInIds={alreadyInIds}
-              disableAlreadyIn={disableAlreadyIn} filter={filter} depth={depth + 1} />
+              disableAlreadyIn={disableAlreadyIn} visibleIds={visibleIds} depth={depth + 1} />
           : null;
-        // Hide subtree if neither this node nor any descendant matches
-        if (!matches && !childContainsMatch(b, q)) return null;
 
         const excluded = excludedSet.has(b.id);
         const alreadyIn = alreadyInIds.includes(b.id);
@@ -155,10 +156,4 @@ function PickableTree({ bins, selectedId, onSelect, excludedSet, alreadyInIds, d
       })}
     </ul>
   );
-}
-
-function childContainsMatch(node: BinNode, q: string): boolean {
-  if (!q) return true;
-  if (node.name.toLowerCase().includes(q)) return true;
-  return (node.children ?? []).some((c) => childContainsMatch(c, q));
 }
