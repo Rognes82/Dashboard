@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ProfileCard, type ProfileDisplay } from "@/components/settings/ProfileCard";
 import { ProfileForm } from "@/components/settings/ProfileForm";
+import { ClassifierSettings } from "@/components/settings/ClassifierSettings";
 import { ActionButton } from "@/components/ActionButton";
 import type { SyncStatusRecord } from "@/lib/types";
 
@@ -126,6 +127,8 @@ export default function SettingsPage() {
             )}
           </div>
         </div>
+
+        <ClassifierSettings />
 
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div className="bg-raised border border-border-default rounded-md p-5">
