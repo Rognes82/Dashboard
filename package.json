@@ -13,6 +13,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "classify": "tsx scripts/agent-classify.ts",
     "init-db": "tsx scripts/init-db.ts",
     "sync:projects": "tsx scripts/sync-projects.ts",
     "sync:cron": "tsx scripts/sync-cron.ts",
