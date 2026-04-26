@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { BinNode, SyncStatusRecord } from "@/lib/types";
 import { findBinById } from "@/lib/bins/tree";
-import { BinTree } from "./BinTree";
+import { BinTree } from "./bin-tree";
 import { CreateBinModal } from "./CreateBinModal";
 import { BinPicker } from "./BinPicker";
 import { DeleteBinModal } from "./DeleteBinModal";
