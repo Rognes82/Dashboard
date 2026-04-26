@@ -42,10 +42,11 @@ export function Sidebar({
   const [createParent, setCreateParent] = useState<{ id: string | null; name?: string }>({ id: null });
   const [refreshKey, setRefreshKey] = useState(0);
   const [moveBin, setMoveBin] = useState<BinNode | null>(null);
-  const [mergeBinSource, setMergeBinSource] = useState<BinNode | null>(null);
-  const [mergeTargetId, setMergeTargetId] = useState<string | null>(null);
-  const [mergeTargetName, setMergeTargetName] = useState<string>("");
-  const [mergePickerOpen, setMergePickerOpen] = useState(false);
+  type MergeFlow =
+    | { phase: "idle" }
+    | { phase: "picking"; source: BinNode }
+    | { phase: "confirming"; source: BinNode; target: { id: string; name: string } };
+  const [merge, setMerge] = useState<MergeFlow>({ phase: "idle" });
   const [deleteBin, setDeleteBin] = useState<BinNode | null>(null);
 
   useEffect(() => {
@@ -137,10 +138,7 @@ export function Sidebar({
             setCreateOpen(true);
           }}
           onRequestMoveBin={(bin) => setMoveBin(bin)}
-          onRequestMerge={(bin) => {
-            setMergeBinSource(bin);
-            setMergePickerOpen(true);
-          }}
+          onRequestMerge={(bin) => setMerge({ phase: "picking", source: bin })}
           onRequestDelete={(bin) => setDeleteBin(bin)}
         />
       </div>
@@ -196,39 +194,38 @@ export function Sidebar({
         />
       )}
 
-      {mergeBinSource && (
+      {merge.phase === "picking" && (
         <BinPicker
-          open={mergePickerOpen}
-          onClose={() => {
-            setMergePickerOpen(false);
-            setMergeBinSource(null);
-          }}
-          title={`Merge "${mergeBinSource.name}" into…`}
-          excludeIds={[mergeBinSource.id]}
+          open
+          onClose={() => setMerge({ phase: "idle" })}
+          title={`Merge "${merge.source.name}" into…`}
+          excludeIds={[merge.source.id]}
           onPick={(targetId) => {
             if (!targetId) return;
+            // TS narrows merge.phase === "picking" inside this branch — capture for clarity.
+            const source = merge.source;
             const target = findBinById(bins, targetId);
-            setMergeTargetId(targetId);
-            setMergeTargetName(target?.name ?? "?");
-            setMergePickerOpen(false);
+            setMerge({
+              phase: "confirming",
+              source,
+              target: { id: targetId, name: target?.name ?? "?" },
+            });
           }}
         />
       )}
 
-      {mergeBinSource && mergeTargetId && (
+      {merge.phase === "confirming" && (
         <MergeBinModal
-          open={!!mergeTargetId}
-          sourceId={mergeBinSource.id}
-          sourceName={mergeBinSource.name}
-          targetId={mergeTargetId}
-          targetName={mergeTargetName}
-          onClose={() => {
-            setMergeTargetId(null);
-            setMergeBinSource(null);
-          }}
+          open
+          sourceId={merge.source.id}
+          sourceName={merge.source.name}
+          targetId={merge.target.id}
+          targetName={merge.target.name}
+          onClose={() => setMerge({ phase: "idle" })}
           onMerged={(targetId) => {
             onSelectBin(targetId);
             setRefreshKey((k) => k + 1);
+            setMerge({ phase: "idle" });
           }}
         />
       )}
