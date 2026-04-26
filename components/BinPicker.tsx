@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, ModalFooter } from "./Modal";
 import type { BinNode } from "@/lib/types";
 import { findBinById, collectMatchingIds } from "@/lib/bins/tree";
@@ -55,52 +55,103 @@ export function BinPicker({
     return out;
   }, [bins, filter]);
 
+  // Flat list of selectable bin IDs (and null for top-level pseudo-row)
+  // in render-display order. Used for arrow-key navigation.
+  const selectableIds: Array<string | null> = useMemo(() => {
+    const out: Array<string | null> = [];
+    if (showTopLevelOption) out.push(null);
+    function walk(nodes: BinNode[]) {
+      for (const b of nodes) {
+        if (visibleIds && !visibleIds.has(b.id)) continue;
+        const excluded = excludedSet.has(b.id);
+        const alreadyDisabled = alreadyInIds.includes(b.id) && disableAlreadyIn;
+        if (!excluded && !alreadyDisabled) out.push(b.id);
+        if (b.children?.length) walk(b.children);
+      }
+    }
+    walk(bins);
+    return out;
+  }, [bins, visibleIds, excludedSet, alreadyInIds, disableAlreadyIn, showTopLevelOption]);
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (selectableIds.length === 0) return;
+      e.preventDefault();
+      const currentIdx = selectableIds.indexOf(selected);
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      const len = selectableIds.length;
+      const nextIdx = currentIdx === -1
+        ? (delta === 1 ? 0 : len - 1)
+        : (currentIdx + delta + len) % len;
+      setSelected(selectableIds[nextIdx]);
+    } else if (e.key === "Enter") {
+      if (showTopLevelOption || selected !== null) {
+        e.preventDefault();
+        onPick(selected);
+        onClose();
+      }
+    }
+  }
+
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    // selected is `string | null` — null is the "Top level" pseudo-row marker.
+    // The ?? "__top__" handles the null case; no other guard needed.
+    const target = selected ?? "__top__";
+    const el = bodyRef.current?.querySelector(`[data-bin-id="${target}"]`) as HTMLElement | null;
+    el?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+
   return (
     <Modal open={open} onClose={onClose} title={title} size="md">
-      <input
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        placeholder="Filter bins…"
-        className="w-full px-3 py-2 bg-base border border-border-default rounded text-text-primary outline-none focus:border-accent"
-      />
-      <div className="mt-3 max-h-72 overflow-auto border border-border-default rounded p-2">
-        {showTopLevelOption && (
-          <button
-            onClick={() => setSelected(null)}
-            className={[
-              "w-full text-left px-2 py-1 rounded text-xs font-mono uppercase tracking-wide",
-              selected === null ? "bg-accent/20 text-accent ring-1 ring-accent" : "text-text-secondary hover:bg-base",
-            ].join(" ")}
-          >
-            ↑ Top level (no parent)
+      <div ref={bodyRef} onKeyDown={handleKeyDown} tabIndex={-1} className="outline-none">
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter bins…"
+          className="w-full px-3 py-2 bg-base border border-border-default rounded text-text-primary outline-none focus:border-accent"
+        />
+        <div className="mt-3 max-h-72 overflow-auto border border-border-default rounded p-2">
+          {showTopLevelOption && (
+            <button
+              data-bin-id="__top__"
+              onClick={() => setSelected(null)}
+              className={[
+                "w-full text-left px-2 py-1 rounded text-xs font-mono uppercase tracking-wide",
+                selected === null ? "bg-accent/20 text-accent ring-1 ring-accent" : "text-text-secondary hover:bg-base",
+              ].join(" ")}
+            >
+              ↑ Top level (no parent)
+            </button>
+          )}
+          {bins.length === 0 ? (
+            <div className="text-xs text-text-tertiary py-2">No bins yet — create one first.</div>
+          ) : (
+            <PickableTree
+              bins={bins}
+              selectedId={selected}
+              onSelect={(id) => setSelected(id)}
+              excludedSet={excludedSet}
+              alreadyInIds={alreadyInIds}
+              disableAlreadyIn={disableAlreadyIn}
+              visibleIds={visibleIds}
+            />
+          )}
+        </div>
+        <ModalFooter>
+          <button onClick={onClose} className="px-3 py-1.5 font-mono uppercase tracking-wide text-xs text-text-secondary hover:text-text-primary">
+            Cancel
           </button>
-        )}
-        {bins.length === 0 ? (
-          <div className="text-xs text-text-tertiary py-2">No bins yet — create one first.</div>
-        ) : (
-          <PickableTree
-            bins={bins}
-            selectedId={selected}
-            onSelect={(id) => setSelected(id)}
-            excludedSet={excludedSet}
-            alreadyInIds={alreadyInIds}
-            disableAlreadyIn={disableAlreadyIn}
-            visibleIds={visibleIds}
-          />
-        )}
+          <button
+            disabled={!showTopLevelOption && !selected}
+            onClick={() => { onPick(selected); onClose(); }}
+            className="px-3 py-1.5 font-mono uppercase tracking-wide text-xs bg-accent text-base rounded disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Confirm
+          </button>
+        </ModalFooter>
       </div>
-      <ModalFooter>
-        <button onClick={onClose} className="px-3 py-1.5 font-mono uppercase tracking-wide text-xs text-text-secondary hover:text-text-primary">
-          Cancel
-        </button>
-        <button
-          disabled={!showTopLevelOption && !selected}
-          onClick={() => { onPick(selected); onClose(); }}
-          className="px-3 py-1.5 font-mono uppercase tracking-wide text-xs bg-accent text-base rounded disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Confirm
-        </button>
-      </ModalFooter>
     </Modal>
   );
 }
@@ -134,6 +185,7 @@ function PickableTree({ bins, selectedId, onSelect, excludedSet, alreadyInIds, d
         return (
           <li key={b.id}>
             <button
+              data-bin-id={b.id}
               disabled={disabled}
               onClick={() => onSelect(b.id)}
               style={{ paddingLeft: depth * 12 + 8 }}
