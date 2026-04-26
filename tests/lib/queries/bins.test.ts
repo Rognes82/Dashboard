@@ -327,21 +327,25 @@ describe("bins queries", () => {
     });
 
     it("preserves relative order with id tiebreaker on equal sort_order", () => {
-      // Force two bins to identical sort_order via createBin.
-      // ULIDs are time-sorted so first-created has lower id.
-      const a = createBin({ name: "A", sort_order: 1000 });
-      const b = createBin({ name: "B", sort_order: 1000 });
+      // Force two bins to identical sort_order at the same parent level.
+      // newId() uses plain ulid() (non-monotonic within the same ms), so we
+      // can't rely on creation order matching ID order — instead, we identify
+      // the lower-id bin after creation and assert IT got the lower sort_order.
+      const x = createBin({ name: "X", sort_order: 1000 });
+      const y = createBin({ name: "Y", sort_order: 1000 });
       const c = createBin({ name: "C", sort_order: 1000.00000001 });
       // Trigger renumber by writing a value that collapses a gap
       updateBinSortOrder(c.id, { sort_order: 1000.00000002 });
-      // After renumber, both originally-tied bins get distinct values; lower-id first.
-      const aSort = getBinById(a.id)?.sort_order ?? 0;
-      const bSort = getBinById(b.id)?.sort_order ?? 0;
+      // After renumber: among the two tied bins, lower-id sorts first.
+      const lowerId = x.id < y.id ? x.id : y.id;
+      const higherId = x.id < y.id ? y.id : x.id;
+      const lowerSort = getBinById(lowerId)?.sort_order ?? 0;
+      const higherSort = getBinById(higherId)?.sort_order ?? 0;
       const cSort = getBinById(c.id)?.sort_order ?? 0;
-      expect(aSort).toBeLessThan(bSort);
-      expect(bSort).toBeLessThan(cSort);
+      expect(lowerSort).toBeLessThan(higherSort);
+      expect(higherSort).toBeLessThan(cSort);
       // Distinct values
-      expect(new Set([aSort, bSort, cSort]).size).toBe(3);
+      expect(new Set([lowerSort, higherSort, cSort]).size).toBe(3);
     });
 
     it("supports re-parent + sort_order in same call", () => {
