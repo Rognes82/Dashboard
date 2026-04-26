@@ -119,9 +119,12 @@ export function listVaultNotesByBin(bin_id: string, limit = 500): VaultNote[] {
     .all(bin_id, limit) as VaultNote[];
 }
 
-function buildNotesWithBinsRows(rows: Array<VaultNote & { bin_ids: string | null }>): Array<VaultNote & { bins: string[] }> {
+/** A vault note with its assigned bin IDs embedded. The (note_id, bin_id) PK on note_bins guarantees no duplicates in `bins`. */
+export type VaultNoteWithBins = VaultNote & { bins: string[] };
+
+function buildNotesWithBinsRows(rows: Array<VaultNote & { bin_ids: string | null }>): VaultNoteWithBins[] {
   return rows.map(({ bin_ids, ...note }) => ({
-    ...(note as VaultNote),
+    ...note,
     bins: bin_ids ? bin_ids.split(",").sort() : [],
   }));
 }
@@ -129,7 +132,7 @@ function buildNotesWithBinsRows(rows: Array<VaultNote & { bin_ids: string | null
 /**
  * Like listVaultNotes(limit) but each note includes its assigned bin IDs.
  */
-export function listVaultNotesWithBins(limit = 200): Array<VaultNote & { bins: string[] }> {
+export function listVaultNotesWithBins(limit = 200): VaultNoteWithBins[] {
   const rows = getDb()
     .prepare(
       `SELECT vn.*, GROUP_CONCAT(nb.bin_id) AS bin_ids
@@ -147,7 +150,7 @@ export function listVaultNotesWithBins(limit = 200): Array<VaultNote & { bins: s
 /**
  * Like listVaultNotesByBin(binId, limit) but each note includes its assigned bin IDs.
  */
-export function listVaultNotesByBinWithBins(bin_id: string, limit = 500): Array<VaultNote & { bins: string[] }> {
+export function listVaultNotesByBinWithBins(bin_id: string, limit = 500): VaultNoteWithBins[] {
   const rows = getDb()
     .prepare(
       `SELECT vn.*, GROUP_CONCAT(nb.bin_id) AS bin_ids
