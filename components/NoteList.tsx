@@ -14,6 +14,8 @@ interface Props {
   selectedPath?: string | null;
   /** Bin currently displayed (null for Recent view). */
   currentBinId?: string | null;
+  /** Display name of the current bin — used in Remove toast. Optional. */
+  currentBinName?: string;
   /** note_id → bin_ids[]. Optional; if undefined, multi-bin badge is hidden. */
   noteBins?: Map<string, string[]>;
   /** Refresh callback after a mutation. */
@@ -45,6 +47,7 @@ export function NoteList({
   emptyMessage = "No notes.",
   selectedPath,
   currentBinId,
+  currentBinName,
   noteBins,
   onMutated,
 }: Props) {
@@ -89,7 +92,7 @@ export function NoteList({
               method: "DELETE",
             });
             if (!res.ok) throw new Error(`Remove failed (${res.status})`);
-            show(`Removed from bin`, "info");
+            show(`Removed from '${currentBinName ?? "bin"}'`, "info");
             onMutated?.();
           } catch (err) {
             show(err instanceof Error ? err.message : "Remove failed", "error");
