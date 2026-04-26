@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { resetDbForTesting, closeDb } from "../../lib/db";
+import { resetDbForTesting, closeDb, getDb, migrate } from "../../lib/db";
 import { runVaultIndexer } from "../../scripts/vault-indexer";
 import { listVaultNotes, searchVaultNotes, getVaultNoteByPath } from "../../lib/queries/vault-notes";
 import { listBins, createBin, listBinsForNote, getOrCreateBinBySeed } from "../../lib/queries/bins";
@@ -13,6 +13,7 @@ function initTestDb() {
   const db = resetDbForTesting(TEST_DB);
   const schema = fs.readFileSync(path.join(process.cwd(), "lib", "schema.sql"), "utf-8");
   db.exec(schema);
+  migrate(db);
 }
 
 describe("vault-indexer", () => {
@@ -104,5 +105,34 @@ describe("vault-indexer", () => {
     const { getVaultNoteById } = await import("../../lib/queries/vault-notes");
     expect(getVaultNoteById(note.id)).toBeNull();
     fs.rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it("sets classifier_skip = 1 when frontmatter.bins is non-empty", async () => {
+    // Use a scratch vault so we can write a fresh fixture without mutating
+    // the committed fixtures dir.
+    const scratch = path.join(process.cwd(), "tests", "fixtures", "scratch-skip-vault");
+    fs.mkdirSync(scratch, { recursive: true });
+    try {
+      const travel = createBin({ name: "Travel", source_seed: "travel" });
+      fs.writeFileSync(
+        path.join(scratch, "skip-me.md"),
+        "---\nbins:\n  - travel\n---\n\nbody"
+      );
+      await runVaultIndexer({ vaultPath: scratch });
+
+      const note = getVaultNoteByPath("skip-me.md")!;
+      expect(note).toBeTruthy();
+
+      // (a) the assignment was created
+      expect(listBinsForNote(note.id).map((b) => b.id)).toContain(travel.id);
+
+      // (b) classifier_skip flag is set
+      const row = getDb()
+        .prepare("SELECT classifier_skip FROM vault_notes WHERE vault_path = ?")
+        .get("skip-me.md") as { classifier_skip: number };
+      expect(row.classifier_skip).toBe(1);
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });

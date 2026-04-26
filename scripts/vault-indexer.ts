@@ -112,6 +112,11 @@ export async function runVaultIndexer(opts: RunOptions): Promise<void> {
           assignNoteToBin({ note_id: note.id, bin_id: row.id, assigned_by: "auto" });
         }
       }
+      // v1.3: explicit frontmatter bin assignment means user has placed this note;
+      // classifier should skip it on future runs.
+      if (frontmatter.bins.length > 0) {
+        db.prepare("UPDATE vault_notes SET classifier_skip = 1 WHERE id = ?").run(note.id);
+      }
     }
   }
 
