@@ -42,6 +42,30 @@ describe("POST /api/classify/auto/[id]/undo", () => {
     expect(db.prepare("SELECT 1 FROM classification_log WHERE action = 'undone' AND prior_log_id = ?").get(logId)).toBeTruthy();
   });
 
+  it("does not count undo as a rejected classifier attempt", async () => {
+    const note = upsertVaultNote({
+      vault_path: "note-attempts.md", title: "X", source: "obsidian",
+      source_id: null, source_url: null, content_hash: "h", modified_at: nowIso(),
+    });
+    const bin = createBin({ name: "Travel" });
+    assignNoteToBin({ note_id: note.id, bin_id: bin.id, assigned_by: "agent" });
+    const runId = insertClassifierRun({ trigger: "manual" });
+    const logId = insertLogRow({
+      note_id: note.id, action: "auto_assign", bin_id: bin.id, new_bin_path: null,
+      existing_confidence: 0.9, new_bin_rating: null, reasoning: "r", model: "haiku",
+      profile_id: "p1", run_id: runId, prior_log_id: null,
+    });
+
+    const res = await POST(new Request("http://localhost/", { method: "POST" }), { params: { id: logId } });
+
+    expect(res.status).toBe(200);
+    const row = getDb()
+      .prepare("SELECT classifier_attempts, classifier_skip FROM vault_notes WHERE id = ?")
+      .get(note.id) as { classifier_attempts: number; classifier_skip: number };
+    expect(row.classifier_attempts).toBe(0);
+    expect(row.classifier_skip).toBe(0);
+  });
+
   it("deletes auto-created bin if empty after undo", async () => {
     const note = upsertVaultNote({
       vault_path: "note-b.md", title: "X", source: "obsidian",

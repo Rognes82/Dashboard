@@ -1,8 +1,12 @@
 .superpowers/
+.DS_Store
+.env.local
+.env.*.local
 node_modules/
 .next/
 out/
 data/*.db
+data/*.db.before-*
 data/*.db-journal
 data/*.db-shm
 data/*.db-wal

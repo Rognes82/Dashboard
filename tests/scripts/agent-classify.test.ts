@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { resetDbForTesting, closeDb, getDb, migrate } from "../../lib/db";
 import { upsertVaultNote } from "../../lib/queries/vault-notes";
 import { createBin } from "../../lib/queries/bins";
+import { setSettingJson } from "../../lib/queries/app-settings";
 import { nowIso } from "../../lib/utils";
 import { runClassifierBatch } from "../../scripts/agent-classify";
 import type { ClassifierLlm } from "../../lib/classify/run";
@@ -79,5 +80,31 @@ describe("runClassifierBatch", () => {
     seed("note-eligible");
     const summary = await runClassifierBatch({ trigger: "manual", llm: alwaysAssign("travel"), profileId: "p1", concurrency: 1, rateLimitRpm: 100, cap: 10, vaultPath: TEST_VAULT });
     expect(summary.notes_seen).toBe(1);
+  });
+
+  it("uses configured thresholds when deciding whether to auto-assign", async () => {
+    createBin({ name: "Travel" });
+    const noteId = seed("threshold-note");
+    setSettingJson("classify.thresholds", {
+      existing_min: 0.99,
+      new_bin_floor: 0.75,
+      new_bin_margin: 0.3,
+    });
+
+    const summary = await runClassifierBatch({
+      trigger: "manual",
+      llm: alwaysAssign("travel"),
+      profileId: "p1",
+      concurrency: 1,
+      rateLimitRpm: 100,
+      cap: 10,
+      vaultPath: TEST_VAULT,
+    });
+
+    expect(summary.notes_seen).toBe(1);
+    expect(summary.notes_auto_assigned).toBe(0);
+    expect(summary.notes_pending).toBe(1);
+    expect(getDb().prepare("SELECT 1 FROM note_bins WHERE note_id = ?").get(noteId)).toBeUndefined();
+    expect(getDb().prepare("SELECT 1 FROM classification_proposals WHERE note_id = ?").get(noteId)).toBeTruthy();
   });
 });

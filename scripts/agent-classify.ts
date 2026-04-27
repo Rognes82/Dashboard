@@ -7,11 +7,13 @@ import {
   ConcurrentRunError,
 } from "../lib/queries/classifications";
 import { runClassifyOnce, type ClassifierLlm } from "../lib/classify/run";
+import { DEFAULT_THRESHOLDS, type Thresholds } from "../lib/classify/decide";
 import { createRateLimiter } from "../lib/classify/rate-limit";
-import { getSetting } from "../lib/queries/app-settings";
+import { getSetting, getSettingJson } from "../lib/queries/app-settings";
 import { resolveClassifyProfileId } from "../lib/classify/profile";
 import { getProfile } from "../lib/llm/profiles";
 import { buildClassifierLlm } from "../lib/classify/llm-adapter";
+import { getVaultPath } from "../lib/vault/path";
 
 export interface BatchArgs {
   trigger: "cron" | "manual";
@@ -50,7 +52,8 @@ export async function runClassifierBatch(args: BatchArgs): Promise<ClassifierRun
     const fs = await import("node:fs");
     const path = await import("node:path");
     const limit = pLimit(args.concurrency);
-    const vaultBase = args.vaultPath ?? process.env.VAULT_PATH ?? path.join(process.env.HOME ?? "", "Vault");
+    const vaultBase = args.vaultPath ?? getVaultPath();
+    const thresholds = getSettingJson<Thresholds>("classify.thresholds") ?? DEFAULT_THRESHOLDS;
 
     await Promise.all(
       notes.map((n) =>
@@ -68,7 +71,7 @@ export async function runClassifierBatch(args: BatchArgs): Promise<ClassifierRun
             return;
           }
           const note = { id: n.id, title: n.title, frontmatter, body };
-          const result = await runClassifyOnce({ note, llm: args.llm, runId, profileId: args.profileId });
+          const result = await runClassifyOnce({ note, llm: args.llm, runId, profileId: args.profileId, thresholds });
           if (result.action === "auto_assign") summary.notes_auto_assigned++;
           else if (result.action === "auto_create_bin") summary.notes_auto_created++;
           else if (result.action === "pending") summary.notes_pending++;

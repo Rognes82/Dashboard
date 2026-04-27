@@ -2,7 +2,7 @@ import fastGlob from "fast-glob";
 import fs from "fs";
 import path from "path";
 import { getDb, closeDb } from "../lib/db";
-import { nowIso } from "../lib/utils";
+import { nowIso, slugify } from "../lib/utils";
 import { hashContent } from "../lib/vault/hash";
 import { parseFrontmatter, extractInlineTags } from "../lib/vault/frontmatter";
 import { markdownToPlainText, deriveTitle } from "../lib/vault/markdown";
@@ -15,9 +15,59 @@ import {
 } from "../lib/queries/vault-notes";
 import { assignNoteToBin } from "../lib/queries/bins";
 import { recordSyncRun } from "../lib/queries/sync-status";
+import { getVaultPath } from "../lib/vault/path";
 import type { VaultNoteSource } from "../lib/types";
 
 const IGNORE_GLOBS = ["**/.obsidian/**", "**/.trash/**", "**/.git/**", "**/node_modules/**", "**/*.icloud"];
+
+interface BinLookupRow {
+  id: string;
+  name: string;
+  parent_bin_id: string | null;
+  source_seed: string | null;
+}
+
+function normalizeBinPathRef(ref: string): string {
+  return ref
+    .trim()
+    .split("/")
+    .map((segment) => slugify(segment))
+    .filter(Boolean)
+    .join("/");
+}
+
+function buildBinRefLookup(db: ReturnType<typeof getDb>): Map<string, string> {
+  const rows = db.prepare("SELECT id, name, parent_bin_id, source_seed FROM bins").all() as BinLookupRow[];
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const pathCache = new Map<string, string | null>();
+
+  function pathFor(row: BinLookupRow): string | null {
+    if (pathCache.has(row.id)) return pathCache.get(row.id) ?? null;
+    const slug = slugify(row.name);
+    if (!slug) {
+      pathCache.set(row.id, null);
+      return null;
+    }
+    if (!row.parent_bin_id) {
+      pathCache.set(row.id, slug);
+      return slug;
+    }
+    const parent = byId.get(row.parent_bin_id);
+    const parentPath = parent ? pathFor(parent) : null;
+    const fullPath = parentPath ? `${parentPath}/${slug}` : slug;
+    pathCache.set(row.id, fullPath);
+    return fullPath;
+  }
+
+  const lookup = new Map<string, string>();
+  for (const row of rows) {
+    lookup.set(row.id, row.id);
+    if (row.source_seed) lookup.set(row.source_seed, row.id);
+    const slugPath = pathFor(row);
+    if (slugPath) lookup.set(slugPath, row.id);
+  }
+  return lookup;
+}
 
 export interface RunOptions {
   vaultPath: string;
@@ -98,19 +148,23 @@ export async function runVaultIndexer(opts: RunOptions): Promise<void> {
     for (const tag of allTags) insertTag.run(note.id, tag);
 
     // Seed bins from frontmatter — ONLY on first index of this file.
-    // Frontmatter `bins:` entries may be either bin ids or human-readable source_seed
-    // tokens. Resolve each entry to a real bin row (source_seed first, then id).
+    // Frontmatter `bins:` entries may be bin ids, source_seed tokens, or
+    // user-facing slug paths like `travel/japan`.
     const isFirstIndex = existing === null;
     if (isFirstIndex && Array.isArray(frontmatter.bins)) {
-      const resolveBin = db.prepare(
-        "SELECT id FROM bins WHERE source_seed = ? OR id = ? LIMIT 1"
-      );
+      const binLookup = buildBinRefLookup(db);
+      const unresolvedBins: string[] = [];
       for (const binRef of frontmatter.bins as unknown[]) {
         if (typeof binRef !== "string") continue;
-        const row = resolveBin.get(binRef, binRef) as { id: string } | undefined;
-        if (row) {
-          assignNoteToBin({ note_id: note.id, bin_id: row.id, assigned_by: "auto" });
+        const binId = binLookup.get(binRef.trim()) ?? binLookup.get(normalizeBinPathRef(binRef));
+        if (binId) {
+          assignNoteToBin({ note_id: note.id, bin_id: binId, assigned_by: "auto" });
+        } else {
+          unresolvedBins.push(binRef);
         }
+      }
+      if (unresolvedBins.length > 0) {
+        console.warn(`[vault-indexer] unresolved bins for ${rel}: ${unresolvedBins.join(", ")}`);
       }
       // v1.3: explicit frontmatter bin assignment means user has placed this note;
       // classifier should skip it on future runs.
@@ -152,7 +206,7 @@ async function main() {
   const args = process.argv.slice(2);
   const vaultIdx = args.indexOf("--vault");
   const fileIdx = args.indexOf("--file");
-  const vaultPath = vaultIdx >= 0 ? args[vaultIdx + 1] : process.env.VAULT_PATH ?? path.join(process.env.HOME ?? "", "Vault");
+  const vaultPath = vaultIdx >= 0 ? args[vaultIdx + 1] : getVaultPath();
   const filePath = fileIdx >= 0 ? args[fileIdx + 1] : undefined;
   try {
     await runVaultIndexer({ vaultPath, filePath });

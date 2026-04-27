@@ -59,7 +59,9 @@ export function ClassifierSection() {
       if (!res.ok) {
         setToast(data.error ?? `HTTP ${res.status}`);
       } else {
-        setToast(`Classified ${data.notes_seen} — ${data.notes_auto_assigned} auto, ${data.notes_pending} pending, ${data.notes_errored} errored`);
+        setToast(
+          `Classified ${data.notes_seen} — ${data.notes_auto_assigned} assigned, ${data.notes_auto_created} created, ${data.notes_pending} pending, ${data.notes_errored} errored`
+        );
       }
       await refresh();
     } catch (e) {
@@ -81,7 +83,7 @@ export function ClassifierSection() {
         </button>
         {lastRun && (
           <span className="text-white/50 text-xs">
-            Last run: {relativeTime(lastRun.started_at)} — {lastRun.notes_seen} seen / {lastRun.notes_auto_assigned} auto / {lastRun.notes_pending} pending / {lastRun.notes_errored} errored
+            Last run: {relativeTime(lastRun.started_at)} — {lastRun.notes_seen} seen / {lastRun.notes_auto_assigned} assigned / {lastRun.notes_auto_created} created / {lastRun.notes_pending} pending / {lastRun.notes_errored} errored
           </span>
         )}
         {toast && <span className="text-white/70 text-xs ml-auto">{toast}</span>}

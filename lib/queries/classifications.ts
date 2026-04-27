@@ -277,7 +277,6 @@ export function undoAutoClassification(logId: string): void {
         binDeleted = true;
       }
     }
-    db.prepare("UPDATE vault_notes SET classifier_attempts = classifier_attempts + 1 WHERE id = ?").run(row.note_id);
     insertLogRow({
       note_id: row.note_id,
       action: "undone",

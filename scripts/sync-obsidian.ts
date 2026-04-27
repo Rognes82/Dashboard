@@ -5,6 +5,7 @@ import { runVaultIndexer } from "./vault-indexer";
 import { getOrCreateBinBySeed, assignNoteToBin } from "../lib/queries/bins";
 import { listVaultNotes } from "../lib/queries/vault-notes";
 import { recordSyncRun, readSyncCursor } from "../lib/queries/sync-status";
+import { getVaultPath } from "../lib/vault/path";
 
 const IGNORE_TOP_LEVEL = new Set([".obsidian", ".trash", ".git", "node_modules", "_meta"]);
 
@@ -91,7 +92,7 @@ function capitalize(s: string): string {
 async function main() {
   const args = process.argv.slice(2);
   const vaultIdx = args.indexOf("--vault");
-  const vaultPath = vaultIdx >= 0 ? args[vaultIdx + 1] : process.env.VAULT_PATH ?? path.join(process.env.HOME ?? "", "Vault");
+  const vaultPath = vaultIdx >= 0 ? args[vaultIdx + 1] : getVaultPath();
   try {
     await runSyncObsidian({ vaultPath });
     console.log("[sync-obsidian] ok");

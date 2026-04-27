@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import path from "path";
 import { spawnSync } from "child_process";
+import { getVaultPath } from "@/lib/vault/path";
 
-const VAULT_PATH = process.env.VAULT_PATH ?? path.join(process.env.HOME ?? "", "Vault");
+const VAULT_PATH = getVaultPath();
 const CWD = process.cwd();
 
 export async function POST() {

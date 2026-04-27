@@ -7,8 +7,9 @@ import { getBinById } from "@/lib/queries/bins";
 import { getVaultNoteByPath } from "@/lib/queries/vault-notes";
 import { badRequest, isNonEmptyString, readJson } from "@/lib/validation";
 import { nowIso } from "@/lib/utils";
+import { getVaultPath } from "@/lib/vault/path";
 
-const VAULT_PATH = process.env.VAULT_PATH ?? path.join(process.env.HOME ?? "", "Vault");
+const VAULT_PATH = getVaultPath();
 const CAPTURE_FOLDER = process.env.CAPTURE_FOLDER ?? "captures";
 const CWD = process.cwd();
 

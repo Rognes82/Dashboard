@@ -15,6 +15,7 @@ import {
 } from "../lib/queries/vault-notes";
 import { parseFrontmatter, extractInlineTags } from "../lib/vault/frontmatter";
 import { markdownToPlainText, deriveTitle } from "../lib/vault/markdown";
+import { getVaultPath } from "../lib/vault/path";
 
 // Abstraction so tests can inject a fake client without hitting Notion
 export interface SyncNotionPage {
@@ -177,7 +178,7 @@ export async function runSyncNotion(deps: NotionSyncDeps): Promise<void> {
 }
 
 async function main() {
-  const vaultPath = process.env.VAULT_PATH ?? path.join(process.env.HOME ?? "", "Vault");
+  const vaultPath = getVaultPath();
   const token = process.env.NOTION_TOKEN;
   if (!token) {
     console.error("[sync-notion] NOTION_TOKEN not set in environment");

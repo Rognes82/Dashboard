@@ -7,10 +7,10 @@ A unified dashboard for tracking clients, projects, agents, cron jobs, files, an
 ```bash
 npm install
 npm run init-db
-npm run dev
+PORT=3001 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:3001`.
 
 ## Sync Scripts
 
@@ -24,6 +24,7 @@ npm run sync:agents     # Reads ~/.dashboard/agents/*.json
 
 ### Environment Variables
 
+- `VAULT_PATH` — override the Obsidian vault path. Defaults to the iCloud-backed vault at `~/Library/Mobile Documents/com~apple~CloudDocs/icloud-shared/Obsidian/Obsidian Vault`.
 - `WORK_DIR` — override the directory scanned by sync:projects (default: `~/Work`)
 - `AGENT_CONFIG_DIR` — override where sync:agents looks (default: `~/.dashboard/agents`)
 
@@ -93,6 +94,7 @@ Rather than leaving `npm start` in a terminal, register a launchd agent so the d
   <dict>
     <key>HOSTNAME</key> <string>0.0.0.0</string>
     <key>PORT</key>     <string>3000</string>
+    <key>VAULT_PATH</key><string>/Users/YOU/Library/Mobile Documents/com~apple~CloudDocs/icloud-shared/Obsidian/Obsidian Vault</string>
     <key>PATH</key>     <string>/usr/local/bin:/usr/bin:/bin</string>
   </dict>
   <key>RunAtLoad</key>      <true/>
@@ -147,6 +149,12 @@ The dashboard runs a classifier that places uncategorized notes into bins automa
 - `Thresholds`: tune the auto-assign confidence and auto-create rating + margin gates.
 
 **Running on demand.** Click `Run classifier now` in `/review` after a big sync, or run `npm run classify` from the CLI.
+
+**Cron example.** On the Mac Mini, run the classifier against the same iCloud vault path:
+
+```cron
+*/10 * * * * cd /Users/YOU/Dashboard && VAULT_PATH="/Users/YOU/Library/Mobile Documents/com~apple~CloudDocs/icloud-shared/Obsidian/Obsidian Vault" npm run classify >> /tmp/dashboard-classify.log 2>&1
+```
 
 **Per-note control.**
 - Frontmatter `bins:` (plural array) on a note pre-assigns it AND tells the classifier to skip that note forever.

@@ -7,13 +7,13 @@ Read it first; it captures durable context that isn't obvious from `git log`.
 
 A **chat-primary knowledge dashboard** for a solo creative/dev agency (Vakari Creative).
 Architecture: Next.js 14 + SQLite (metadata only) on a Mac Mini behind Tailscale.
-The **Obsidian vault at `~/Vault/` is the canonical store** — notes live as markdown
+The **iCloud-backed Obsidian vault at `~/Library/Mobile Documents/com~apple~CloudDocs/icloud-shared/Obsidian/Obsidian Vault` is the canonical store** — notes live as markdown
 files; the dashboard is a viewport + organizing layer + retrieval agent on top.
 
 Content sources that sync INTO the vault:
 - Obsidian native markdown (user writes directly)
 - Notion pages (via `sync-notion.ts`, page-based — user does NOT use Notion databases)
-- Quick Captures (`Cmd+Shift+C` modal → writes to `~/Vault/captures/`)
+- Quick Captures (`Cmd+Shift+C` modal → writes to `captures/` inside the canonical vault)
 - Apple Notes (deferred to v2)
 
 Agent: multi-provider LLM (Anthropic native + OpenAI-compatible) with encrypted
@@ -140,8 +140,9 @@ concrete paths forward, and recommend one.
 
 - **Port 3001** for dev server. Port 3000 is always taken by the user's bun process
   (a different project on the same Mac). Always start with `PORT=3001`.
-- **Vault path:** `VAULT_PATH=$HOME/Vault npm run dev` — env var required for
-  sync scripts and chat retrieval.
+- **Vault path:** defaults to `$HOME/Library/Mobile Documents/com~apple~CloudDocs/icloud-shared/Obsidian/Obsidian Vault`.
+  Keep `VAULT_PATH` set to that path in `.env.local`, launchd, and cron when
+  running scripts so dashboard writes sync across the user's Apple devices.
 - **Notion token:** `.env.local` has `NOTION_TOKEN=ntn_...` (gitignored).
   Value may have been rotated — if sync fails with 401, user rotated; grab new
   token from https://www.notion.so/profile/integrations.
@@ -164,15 +165,16 @@ concrete paths forward, and recommend one.
 
 3. **Page-based Notion sync, not database-based.** Pivoted mid-Phase-2 when user
    said they don't use Notion databases. `sync-notion.ts` iterates page IDs from
-   `app_settings.notion.sync_targets` and outputs flat `~/Vault/notion-sync/<slug>.md`.
+   `app_settings.notion.sync_targets` and outputs flat `notion-sync/<slug>.md`
+   inside the canonical iCloud-backed vault.
 
 4. **No chokidar daemon.** Cron-driven vault indexer every 5 min. Capture triggers
    an immediate one-shot index pass. Avoided launchd lifecycle + FSEvents edge
    cases. Trade-off: up to 5 min lag for Obsidian edits to propagate.
 
-5. **iCloud for vault sync across devices.** Not Obsidian Sync. User already pays
-   for 200GB iCloud (solves phone storage + vault in one subscription). If sync
-   lag becomes annoying, upgrade to Obsidian Sync ($4/mo) — trivial migration.
+5. **iCloud for vault sync across devices.** Not Obsidian Sync. The canonical
+   vault now lives in iCloud Drive so the MacBook, iPhone, and future Mac Mini
+   host all point at the same Obsidian files.
 
 6. **No emojis in UI.** User was specific: "white retro-futuristic" line icons.
    Emoji icons were replaced with custom SVG components in `components/icons.tsx`.
@@ -212,5 +214,6 @@ When picking up, verify:
 - `npm test` — should show 189 passing
 - `npm run lint` — clean
 - `npm run build` — clean
-- Dev server — if cold, start with `VAULT_PATH=$HOME/Vault PORT=3001 npm run dev`
+- Dev server — if cold, start with `PORT=3001 npm run dev`; `.env.local` should
+  provide the iCloud `VAULT_PATH`.
 - Dashboard at http://localhost:3001 — chat should stream with an active profile

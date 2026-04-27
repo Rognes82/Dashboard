@@ -135,4 +135,29 @@ describe("vault-indexer", () => {
       fs.rmSync(scratch, { recursive: true, force: true });
     }
   });
+
+  it("resolves frontmatter bins by user-facing slug path", async () => {
+    const scratch = path.join(process.cwd(), "tests", "fixtures", "scratch-slug-vault");
+    fs.mkdirSync(scratch, { recursive: true });
+    try {
+      const travel = createBin({ name: "Travel" });
+      const japan = createBin({ name: "Japan", parent_bin_id: travel.id });
+      fs.writeFileSync(
+        path.join(scratch, "slug-bin.md"),
+        "---\nbins:\n  - travel/japan\n---\n\nbody"
+      );
+
+      await runVaultIndexer({ vaultPath: scratch });
+
+      const note = getVaultNoteByPath("slug-bin.md")!;
+      expect(note).toBeTruthy();
+      expect(listBinsForNote(note.id).map((b) => b.id)).toContain(japan.id);
+      const row = getDb()
+        .prepare("SELECT classifier_skip FROM vault_notes WHERE vault_path = ?")
+        .get("slug-bin.md") as { classifier_skip: number };
+      expect(row.classifier_skip).toBe(1);
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  });
 });
