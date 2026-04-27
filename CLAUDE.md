@@ -20,15 +20,31 @@ Agent: multi-provider LLM (Anthropic native + OpenAI-compatible) with encrypted
 profile storage. User has Anthropic direct configured. Can add OpenRouter / Kimi /
 local via settings.
 
-## Current state (as of last session)
+## Current state (as of last session, 2026-04-27)
 
-**Branch:** `main` — v1.2 + v1.2.1 + v1.2.2 all merged and pushed (`8027b02`).
-**Tests:** 219 passing, lint clean, typecheck clean, build clean.
-**Merged to main?** Yes — pushed to origin. `feature/v1.2.2-cleanup` branch deleted post-merge.
-**Deployed to Mac Mini?** Never. Still local-only on the MacBook.
-**Manual smoke pending?** v1.2.1 + v1.2.2 user-driven smoke walkthroughs in their respective plans (`docs/superpowers/plans/2026-04-25-manual-bin-management.md` Task 25, `docs/superpowers/plans/2026-04-26-v122-cleanup.md` Task 21). User has not yet run them but everything is committed and gates pass.
+**Main branch:** `c156a57` — v1.2/v1.2.1/v1.2.2 shipped + v1.3 spec & plan committed (no v1.3 implementation yet).
+**v1.3 implementation branch:** `feature/v1.3-auto-classify` at `92281db` — all 25 tasks done, pushed to origin.
+**v1.3 worktree:** `/Users/carterrognes/Work/Claude/Projects/Dashboard-v1.3` (sibling of main repo).
+**Tests on v1.3 branch:** 298 passing (was 219 baseline, +79 new). Lint, typecheck, build all clean.
+**Manual smoke pending:** v1.3 12-step walkthrough documented in `README.md` `### Manual smoke walkthrough` (on the feature branch). v1.2.1 + v1.2.2 smoke also still pending from prior sessions.
+**PR:** Not opened yet. Use `gh pr create` from worktree, or visit https://github.com/Rognes82/Dashboard/pull/new/feature/v1.3-auto-classify
 
-**v1.3 brainstorm in progress.** Just asked Q1 (auto-assign vs propose-and-approve vs hybrid-by-confidence). Recommendation was **C — hybrid with 0.9 confidence threshold**: agent assigns automatically when confident, queues a proposal otherwise. User clearing context before answering Q1 — re-pose the question fresh after clear.
+**v1.3 spec/plan reference:**
+- Spec: `docs/superpowers/specs/2026-04-26-v13-auto-classify-design.md` (3 Kimi-audit rounds → SHIP)
+- Plan: `docs/superpowers/plans/2026-04-26-v13-auto-classify.md` (25 tasks, TDD-structured, 1 Kimi-audit round → SHIP)
+
+**v1.3 final-review flagged follow-ups (non-blocking, candidates for v1.3.1):**
+- Add sample crontab line to README's classifier section (currently only mentions `npm run classify`)
+- Add warn-log in `scripts/vault-indexer.ts:111` when `frontmatter.bins` references an unresolved bin (currently silent typo footgun — note becomes orphaned with `classifier_skip = 1`)
+- Dedupe `titleCase` (defined in both `lib/classify/decide.ts` and `app/api/classify/proposals/[id]/route.ts`)
+- `components/settings/ClassifierSettings.tsx` uses spec-literal Tailwind classes (`bg-black/40 border-white/20`); rest of settings page uses `bg-raised border-border-default`. Visual mismatch.
+- `/api/classify/run` blocks request thread for the full batch (~2 min for 100-note backlog at 3-concurrency × ~3-4s/call). Toast only renders after completion. Streaming progress is a v1.4 candidate.
+
+**v1.3 highest-risk smoke steps (per final review):**
+1. Step 11 — concurrent-run guard (two-process race; verify clean 409 toast vs hang)
+2. Step 8 — auto-create titleCase: `q3-okrs` → `"Q3 Okrs"` (cosmetic, not `"Q3 OKRs"`)
+3. Step 10 — frontmatter typo footgun (typo'd bin name still flips skip flag)
+4. Step 9 — undo of bin shared with another note (bin should NOT delete if other notes assigned)
 
 **What shipped in v1.2:**
 - Full UI redesign — chat-primary layout, persistent bin tree sidebar, dark gray +
@@ -196,21 +212,37 @@ concrete paths forward, and recommend one.
 
 ## What to do next session
 
-v1.2.1 is functionally complete; user's immediate next decisions:
-1. **Run the manual smoke** for v1.2.1 (Task 25 Step 5 checklist in the plan) — verifies right-click flows, drag-and-drop, modals end-to-end. Tip: `rm data/dashboard.db` first if you want to see the new REAL `sort_order` declaration take effect (existing DB keeps the old INTEGER per `CREATE TABLE IF NOT EXISTS`; SQLite dynamic typing means fractional values still work in the old column anyway).
-2. **Either** patch any smoke-test findings, **or** decide on next phase:
-   - **v1.2.2 cleanup** — populate `noteBins` (extend GET /api/notes), extract `findBinById` shared util, consolidate merge state into discriminated union, split BinTree.tsx
-   - **v1.3 auto-classify agent** — `scripts/agent-classify.ts` for uncategorized notes
-   - **v1.4 segment extraction** — needs new brainstorm cycle
-   - **Phase 4 deploy** — Mac Mini launchd plist, cron, backups
+**Immediate priority: smoke v1.3.** Work in the worktree at `/Users/carterrognes/Work/Claude/Projects/Dashboard-v1.3` (branch `feature/v1.3-auto-classify`). The 12-step manual smoke walkthrough is in that branch's `README.md` under `### Manual smoke walkthrough`.
 
-Pattern to follow: brainstorm → spec → Kimi audit → plan → Kimi audit → execute
-(subagent-driven, Opus).
+**Smoke setup (one-time, in worktree):**
+```bash
+cd /Users/carterrognes/Work/Claude/Projects/Dashboard-v1.3
+# Snapshot main DB (WAL-aware) so worktree has bins/profiles/settings:
+sqlite3 /Users/carterrognes/Work/Claude/Projects/Dashboard/data/dashboard.db ".backup data/dashboard.db"
+cp /Users/carterrognes/Work/Claude/Projects/Dashboard/.env.local .env.local
+VAULT_PATH=$HOME/Vault PORT=3001 npm run dev   # starts on :3001
+# In another shell, confirm migration applied:
+sqlite3 data/dashboard.db "PRAGMA user_version;"  # should print 1
+```
 
-When picking up, verify:
-- `git branch --show-current` — should be on `feature/thought-organizer-v12` (v1.2 + v1.2.1 are there, not merged)
-- `npm test` — should show 189 passing
-- `npm run lint` — clean
-- `npm run build` — clean
-- Dev server — if cold, start with `VAULT_PATH=$HOME/Vault PORT=3001 npm run dev`
-- Dashboard at http://localhost:3001 — chat should stream with an active profile
+After dev server is up, open http://localhost:3001/settings → confirm "Classifier" section appears. Then http://localhost:3001/review → "Run classifier now" button + the 12-step walkthrough.
+
+**After smoke passes:**
+1. Patch any smoke findings on the branch
+2. Address final-review follow-ups in the "v1.3 final-review flagged follow-ups" list above (cron sample, frontmatter warn-log, dedupe titleCase, settings palette)
+3. `gh pr create` from worktree (or use https://github.com/Rognes82/Dashboard/pull/new/feature/v1.3-auto-classify)
+4. Merge to main, delete worktree (`git worktree remove ../Dashboard-v1.3`)
+5. Update this CLAUDE.md "Current state" section to reflect v1.3 shipped on main
+
+**After v1.3 merges, next decision:**
+- **v1.4 segment extraction** — needs new brainstorm cycle. User's vision: split a Notion doc's 10 atomic ideas into 10 routed bins. v1.3 was prerequisite infrastructure.
+- **Phase 4 deploy** — Mac Mini launchd plist + cron entries (vault-indexer + sync + classifier), backups, iCloud verification. Cron entry for classifier needs to be added to README before deploy.
+- **v1.3.1 polish** — the final-review follow-ups consolidated into one cleanup release.
+
+Pattern to follow: brainstorm → spec → Kimi audit → plan → Kimi audit → execute (subagent-driven, Opus on Max 20x).
+
+**When picking up, verify in the worktree:**
+- `git branch --show-current` — `feature/v1.3-auto-classify`
+- `git log --oneline | head -3` — top should be `92281db docs(v1.3): classifier README section`
+- `npm test` — 298 passing
+- `npm run lint` / `npx tsc --noEmit` / `npm run build` — clean (build has ~10 pre-existing prerender errors on API routes due to no DB at static-export time; tolerated, not a regression)
