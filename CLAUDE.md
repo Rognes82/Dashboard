@@ -20,15 +20,25 @@ Agent: multi-provider LLM (Anthropic native + OpenAI-compatible) with encrypted
 profile storage. User has Anthropic direct configured. Can add OpenRouter / Kimi /
 local via settings.
 
-## Current state (as of last session)
+## Current state (as of last session, 2026-04-28)
 
-**Branch:** `main` — v1.2 + v1.2.1 + v1.2.2 all merged and pushed (`8027b02`).
-**Tests:** 219 passing, lint clean, typecheck clean, build clean.
-**Merged to main?** Yes — pushed to origin. `feature/v1.2.2-cleanup` branch deleted post-merge.
+**Branch:** `main` — v1.3 whole-note auto-classify shipped via PR #2 after smoke testing.
+**Tests:** 301 passing, lint clean, typecheck clean, build clean.
 **Deployed to Mac Mini?** Never. Still local-only on the MacBook.
-**Manual smoke pending?** v1.2.1 + v1.2.2 user-driven smoke walkthroughs in their respective plans (`docs/superpowers/plans/2026-04-25-manual-bin-management.md` Task 25, `docs/superpowers/plans/2026-04-26-v122-cleanup.md` Task 21). User has not yet run them but everything is committed and gates pass.
+**Canonical vault:** iCloud Drive path at `~/Library/Mobile Documents/com~apple~CloudDocs/icloud-shared/Obsidian/Obsidian Vault`.
+**Manual smoke:** v1.3 12-step walkthrough completed in the v1.3 worktree. Verified auto-assign, proposal rejection/skip, auto-create, undo-with-shared-bin, frontmatter overrides, threshold tuning, and concurrent-run guard.
+**Smoke artifacts:** disposable `v13-smoke-*` notes may still exist under the real iCloud vault's `captures/` folder until the user chooses to delete them.
 
-**v1.3 brainstorm in progress.** Just asked Q1 (auto-assign vs propose-and-approve vs hybrid-by-confidence). Recommendation was **C — hybrid with 0.9 confidence threshold**: agent assigns automatically when confident, queues a proposal otherwise. User clearing context before answering Q1 — re-pose the question fresh after clear.
+**v1.3 spec/plan reference:**
+- Spec: `docs/superpowers/specs/2026-04-26-v13-auto-classify-design.md` (3 Kimi-audit rounds → SHIP)
+- Plan: `docs/superpowers/plans/2026-04-26-v13-auto-classify.md` (25 tasks, TDD-structured, 1 Kimi-audit round → SHIP)
+
+**v1.3.1 follow-ups / polish candidates:**
+- Dedupe `titleCase` (defined in both `lib/classify/decide.ts` and `app/api/classify/proposals/[id]/route.ts`)
+- `components/settings/ClassifierSettings.tsx` uses spec-literal Tailwind classes (`bg-black/40 border-white/20`); rest of settings page uses `bg-raised border-border-default`. Visual mismatch.
+- `/api/classify/run` blocks request thread for the full batch (~2 min for 100-note backlog at 3-concurrency × ~3-4s/call). Toast only renders after completion. Streaming progress is a v1.4 candidate.
+- Bin UX is still thin: user specifically noticed it is hard to inspect what is inside bins and to add sub-bins from the dashboard. This matters because the product goal is Obsidian parity plus AI-assisted routing.
+- Frontmatter typo behavior is safer now because unresolved bins warn during indexing, but typo'd `bins:` entries still set `classifier_skip = 1`; a UI/reporting surface for these warnings would help.
 
 **What shipped in v1.2:**
 - Full UI redesign — chat-primary layout, persistent bin tree sidebar, dark gray +
@@ -88,7 +98,7 @@ auto-classify — idea-level extraction. Outside every spec written so far.
 
 **v1.2.2 — Cleanup release** ✅ shipped on `feature/v1.2.2-cleanup` branch (pending manual smoke + merge). All 21 plan tasks complete. Spec + plan in `docs/superpowers/{specs,plans}/2026-04-26-v122-cleanup-design.md` and `docs/superpowers/plans/2026-04-26-v122-cleanup.md`.
 
-**v1.3 — Whole-note auto-classify** (scoped in original spec §9, ~2 weeks)
+**v1.3 — Whole-note auto-classify** ✅ shipped via PR #2
 - `scripts/agent-classify.ts` reads uncategorized notes, asks LLM to pick a bin
   from the existing hierarchy, assigns via `assignNoteToBin`
 - Runs after sync + on cron
@@ -198,22 +208,19 @@ concrete paths forward, and recommend one.
 
 ## What to do next session
 
-v1.2.1 is functionally complete; user's immediate next decisions:
-1. **Run the manual smoke** for v1.2.1 (Task 25 Step 5 checklist in the plan) — verifies right-click flows, drag-and-drop, modals end-to-end. Tip: `rm data/dashboard.db` first if you want to see the new REAL `sort_order` declaration take effect (existing DB keeps the old INTEGER per `CREATE TABLE IF NOT EXISTS`; SQLite dynamic typing means fractional values still work in the old column anyway).
-2. **Either** patch any smoke-test findings, **or** decide on next phase:
-   - **v1.2.2 cleanup** — populate `noteBins` (extend GET /api/notes), extract `findBinById` shared util, consolidate merge state into discriminated union, split BinTree.tsx
-   - **v1.3 auto-classify agent** — `scripts/agent-classify.ts` for uncategorized notes
-   - **v1.4 segment extraction** — needs new brainstorm cycle
-   - **Phase 4 deploy** — Mac Mini launchd plist, cron, backups
+**Start from main.** Use `/Users/carterrognes/Work/Claude/Projects/Dashboard`, pull `main`, and run the normal gates before new work. The v1.3 worktree can be removed after confirming nothing local is needed from it.
 
-Pattern to follow: brainstorm → spec → Kimi audit → plan → Kimi audit → execute
-(subagent-driven, Opus).
+**Next decision:**
+- **v1.3.1 bin UX + polish** — make it easier to inspect bin contents, add sub-bins, clean up settings styling, dedupe `titleCase`, and surface unresolved frontmatter-bin warnings.
+- **v1.4 segment extraction** — needs new brainstorm cycle. User's vision: split a Notion doc's 10 atomic ideas into 10 routed bins. v1.3 was prerequisite infrastructure.
+- **Phase 4 deploy** — Mac Mini launchd plist + cron entries (vault-indexer + sync + classifier), backups, and iCloud vault verification.
 
-When picking up, verify:
-- `git branch --show-current` — should be on `feature/thought-organizer-v12` (v1.2 + v1.2.1 are there, not merged)
-- `npm test` — should show 189 passing
-- `npm run lint` — clean
-- `npm run build` — clean
-- Dev server — if cold, start with `PORT=3001 npm run dev`; `.env.local` should
-  provide the iCloud `VAULT_PATH`.
-- Dashboard at http://localhost:3001 — chat should stream with an active profile
+Pattern to follow: brainstorm → spec → Kimi audit → plan → Kimi audit → execute (subagent-driven, Opus on Max 20x).
+
+**When picking up, verify:**
+- `git branch --show-current` — should be `main`
+- `git pull --ff-only`
+- `npm test` — should show 301 passing
+- `npm run lint` / `npx tsc --noEmit` / `npm run build` — clean
+- Dev server — if cold, start with `PORT=3001 npm run dev`; `.env.local` should provide the iCloud `VAULT_PATH`.
+- Dashboard at http://localhost:3001 — Settings should show vault status and Review should show the classifier controls.
