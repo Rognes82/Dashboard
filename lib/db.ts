@@ -47,7 +47,7 @@ export function migrate(db: Database.Database, dir?: string): void {
     .readdirSync(migrationsDir)
     .filter((f) => MIGRATION_FILE_RE.test(f))
     .sort((a, b) => parseInt(a.match(MIGRATION_FILE_RE)![1], 10) - parseInt(b.match(MIGRATION_FILE_RE)![1], 10));
-  const current = db.pragma("user_version", { simple: true }) as number;
+  let current = db.pragma("user_version", { simple: true }) as number;
   for (const f of files) {
     const match = f.match(MIGRATION_FILE_RE);
     if (!match) continue;
@@ -55,8 +55,14 @@ export function migrate(db: Database.Database, dir?: string): void {
     if (n <= current) continue;
     const sql = fs.readFileSync(path.join(migrationsDir, f), "utf8");
     db.transaction(() => {
+      const latest = db.pragma("user_version", { simple: true }) as number;
+      if (n <= latest) {
+        current = latest;
+        return;
+      }
       db.exec(sql);
       db.pragma(`user_version = ${n}`);
+      current = n;
     }).immediate();
   }
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { resetDbForTesting, closeDb, migrate } from "../../lib/db";
+import type Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 
@@ -87,5 +88,38 @@ describe("migrate", () => {
     const names = tables.map((t) => t.name);
     expect(names).toContain("foo");
     expect(names).toContain("bar");
+  });
+
+  it("rechecks user_version after acquiring the migration lock", () => {
+    setupMigrationsDir({ "001-racy.sql": "CREATE TABLE foo (id TEXT PRIMARY KEY);" });
+    let version = 0;
+    let execCalled = false;
+    const db = {
+      pragma(sql: string, options?: { simple?: boolean }) {
+        if (sql === "user_version" && options?.simple) return version;
+        if (sql === "user_version = 1") {
+          version = 1;
+          return undefined;
+        }
+        throw new Error(`unexpected pragma: ${sql}`);
+      },
+      transaction(fn: () => void) {
+        return {
+          immediate() {
+            // Simulates another process applying this migration while this
+            // process was waiting for SQLite's write lock.
+            version = 1;
+            return fn();
+          },
+        };
+      },
+      exec() {
+        execCalled = true;
+        throw new Error("stale migration reran");
+      },
+    } as unknown as Database.Database;
+
+    expect(() => migrate(db, MIG_DIR)).not.toThrow();
+    expect(execCalled).toBe(false);
   });
 });
