@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { NoteList } from "@/components/NoteList";
 import { ReadingPane } from "@/components/ReadingPane";
+import { ClassifierSection } from "../../components/review/ClassifierSection";
 import type { VaultNote, Bin } from "@/lib/types";
 
 interface StaleBin extends Bin {
@@ -43,6 +44,10 @@ export default function ReviewPage() {
       <div className="px-6 py-6">
         <div className="mono text-2xs text-text-dim uppercase tracking-wider mb-1">daily triage</div>
         <h1 className="text-xl text-text-primary font-medium mb-6">Review</h1>
+
+        <div className="mb-6">
+          <ClassifierSection />
+        </div>
 
         {loading || !data ? (
           <div className="text-xs text-text-muted">Loading…</div>

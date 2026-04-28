@@ -13,6 +13,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "classify": "tsx scripts/agent-classify.ts",
     "init-db": "tsx scripts/init-db.ts",
     "sync:projects": "tsx scripts/sync-projects.ts",
     "sync:cron": "tsx scripts/sync-cron.ts",
@@ -39,7 +40,8 @@
     "react-dom": "^18.3.1",
     "react-markdown": "^9.1.0",
     "remark-gfm": "^4.0.1",
-    "ulid": "^3.0.2"
+    "ulid": "^3.0.2",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

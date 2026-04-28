@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { resetDbForTesting, closeDb } from "../../lib/db";
+import { resetDbForTesting, closeDb, migrate } from "../../lib/db";
 import { runSyncObsidian } from "../../scripts/sync-obsidian";
 import { listVaultNotes } from "../../lib/queries/vault-notes";
 import { listBins, listBinsForNote, getBinBySeed } from "../../lib/queries/bins";
@@ -13,6 +13,7 @@ function initTestDb() {
   const db = resetDbForTesting(TEST_DB);
   const schema = fs.readFileSync(path.join(process.cwd(), "lib", "schema.sql"), "utf-8");
   db.exec(schema);
+  migrate(db);
 }
 
 describe("sync-obsidian", () => {

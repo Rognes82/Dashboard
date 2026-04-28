@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ProfileCard, type ProfileDisplay } from "@/components/settings/ProfileCard";
 import { ProfileForm } from "@/components/settings/ProfileForm";
+import { ClassifierSettings } from "@/components/settings/ClassifierSettings";
 import { ActionButton } from "@/components/ActionButton";
 import type { SyncStatusRecord } from "@/lib/types";
 
@@ -14,6 +15,7 @@ export default function SettingsPage() {
   const [targets, setTargets] = useState<string>("");
   const [targetsStatus, setTargetsStatus] = useState<string | null>(null);
   const [sync, setSync] = useState<SyncStatusRecord[]>([]);
+  const [vault, setVault] = useState<{ path: string; exists: boolean; writable: boolean } | null>(null);
 
   async function reloadProfiles() {
     const d = await fetch("/api/settings/profiles").then((r) => r.json());
@@ -24,7 +26,10 @@ export default function SettingsPage() {
   useEffect(() => {
     reloadProfiles();
     fetch("/api/settings/notion-targets").then((r) => r.json()).then((d) => setTargets((d.targets ?? []).join("\n")));
-    fetch("/api/system").then((r) => r.json()).then((d) => setSync(d.sync ?? []));
+    fetch("/api/system").then((r) => r.json()).then((d) => {
+      setSync(d.sync ?? []);
+      setVault(d.vault ?? null);
+    });
   }, []);
 
   async function saveProfile(input: Parameters<React.ComponentProps<typeof ProfileForm>["onSave"]>[0]) {
@@ -124,6 +129,22 @@ export default function SettingsPage() {
                 onCancel={() => setAdding(false)}
               />
             )}
+          </div>
+        </div>
+
+        <ClassifierSettings />
+
+        <div className="bg-raised border border-border-default rounded-md p-5 mb-4">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="mono text-2xs text-text-muted uppercase tracking-wider">vault</span>
+            {vault && (
+              <span className={`mono text-2xs ${vault.exists && vault.writable ? "text-accent" : "text-accent-amber"}`}>
+                {vault.exists && vault.writable ? "ready" : "check path"}
+              </span>
+            )}
+          </div>
+          <div className="mono text-2xs text-text-primary break-all">
+            {vault?.path ?? "loading..."}
           </div>
         </div>
 

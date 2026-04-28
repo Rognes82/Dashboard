@@ -12,6 +12,17 @@ export function getDb(dbPath?: string): Database.Database {
   dbInstance = new Database(resolvedPath);
   dbInstance.pragma("journal_mode = WAL");
   dbInstance.pragma("foreign_keys = ON");
+  // Auto-migrate only if baseline schema is already loaded. On a fresh DB, the
+  // caller (init-db.ts or a test) will load schema first and then call migrate
+  // explicitly. This prevents migrations like ALTER TABLE vault_notes from
+  // running before vault_notes exists.
+  const hasUserTables =
+    (
+      dbInstance
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1")
+        .get() as { 1: number } | undefined
+    ) !== undefined;
+  if (hasUserTables) migrate(dbInstance);
   return dbInstance;
 }
 
@@ -25,4 +36,27 @@ export function closeDb(): void {
 export function resetDbForTesting(dbPath: string): Database.Database {
   closeDb();
   return getDb(dbPath);
+}
+
+const MIGRATION_FILE_RE = /^(\d+)-[\w-]+\.sql$/;
+
+export function migrate(db: Database.Database, dir?: string): void {
+  const migrationsDir = dir ?? path.join(process.cwd(), "migrations");
+  if (!fs.existsSync(migrationsDir)) return;
+  const files = fs
+    .readdirSync(migrationsDir)
+    .filter((f) => MIGRATION_FILE_RE.test(f))
+    .sort((a, b) => parseInt(a.match(MIGRATION_FILE_RE)![1], 10) - parseInt(b.match(MIGRATION_FILE_RE)![1], 10));
+  const current = db.pragma("user_version", { simple: true }) as number;
+  for (const f of files) {
+    const match = f.match(MIGRATION_FILE_RE);
+    if (!match) continue;
+    const n = parseInt(match[1], 10);
+    if (n <= current) continue;
+    const sql = fs.readFileSync(path.join(migrationsDir, f), "utf8");
+    db.transaction(() => {
+      db.exec(sql);
+      db.pragma(`user_version = ${n}`);
+    }).immediate();
+  }
 }

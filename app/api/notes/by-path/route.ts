@@ -3,8 +3,9 @@ import fs from "fs";
 import path from "path";
 import { getVaultNoteByPath } from "@/lib/queries/vault-notes";
 import { listBinsForNote } from "@/lib/queries/bins";
+import { getVaultPath } from "@/lib/vault/path";
 
-const VAULT_PATH = process.env.VAULT_PATH ?? path.join(process.env.HOME ?? "", "Vault");
+const VAULT_PATH = getVaultPath();
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);

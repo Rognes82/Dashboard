@@ -7,44 +7,38 @@ Read it first; it captures durable context that isn't obvious from `git log`.
 
 A **chat-primary knowledge dashboard** for a solo creative/dev agency (Vakari Creative).
 Architecture: Next.js 14 + SQLite (metadata only) on a Mac Mini behind Tailscale.
-The **Obsidian vault at `~/Vault/` is the canonical store** — notes live as markdown
+The **iCloud-backed Obsidian vault at `~/Library/Mobile Documents/com~apple~CloudDocs/icloud-shared/Obsidian/Obsidian Vault` is the canonical store** — notes live as markdown
 files; the dashboard is a viewport + organizing layer + retrieval agent on top.
 
 Content sources that sync INTO the vault:
 - Obsidian native markdown (user writes directly)
 - Notion pages (via `sync-notion.ts`, page-based — user does NOT use Notion databases)
-- Quick Captures (`Cmd+Shift+C` modal → writes to `~/Vault/captures/`)
+- Quick Captures (`Cmd+Shift+C` modal → writes to `captures/` inside the canonical vault)
 - Apple Notes (deferred to v2)
 
 Agent: multi-provider LLM (Anthropic native + OpenAI-compatible) with encrypted
 profile storage. User has Anthropic direct configured. Can add OpenRouter / Kimi /
 local via settings.
 
-## Current state (as of last session, 2026-04-27)
+## Current state (as of last session, 2026-04-28)
 
-**Main branch:** `c156a57` — v1.2/v1.2.1/v1.2.2 shipped + v1.3 spec & plan committed (no v1.3 implementation yet).
-**v1.3 implementation branch:** `feature/v1.3-auto-classify` at `92281db` — all 25 tasks done, pushed to origin.
-**v1.3 worktree:** `/Users/carterrognes/Work/Claude/Projects/Dashboard-v1.3` (sibling of main repo).
-**Tests on v1.3 branch:** 298 passing (was 219 baseline, +79 new). Lint, typecheck, build all clean.
-**Manual smoke pending:** v1.3 12-step walkthrough documented in `README.md` `### Manual smoke walkthrough` (on the feature branch). v1.2.1 + v1.2.2 smoke also still pending from prior sessions.
-**PR:** Not opened yet. Use `gh pr create` from worktree, or visit https://github.com/Rognes82/Dashboard/pull/new/feature/v1.3-auto-classify
+**Branch:** `main` — v1.3 whole-note auto-classify shipped via PR #2 after smoke testing.
+**Tests:** 301 passing, lint clean, typecheck clean, build clean.
+**Deployed to Mac Mini?** Never. Still local-only on the MacBook.
+**Canonical vault:** iCloud Drive path at `~/Library/Mobile Documents/com~apple~CloudDocs/icloud-shared/Obsidian/Obsidian Vault`.
+**Manual smoke:** v1.3 12-step walkthrough completed in the v1.3 worktree. Verified auto-assign, proposal rejection/skip, auto-create, undo-with-shared-bin, frontmatter overrides, threshold tuning, and concurrent-run guard.
+**Smoke artifacts:** disposable `v13-smoke-*` notes may still exist under the real iCloud vault's `captures/` folder until the user chooses to delete them.
 
 **v1.3 spec/plan reference:**
 - Spec: `docs/superpowers/specs/2026-04-26-v13-auto-classify-design.md` (3 Kimi-audit rounds → SHIP)
 - Plan: `docs/superpowers/plans/2026-04-26-v13-auto-classify.md` (25 tasks, TDD-structured, 1 Kimi-audit round → SHIP)
 
-**v1.3 final-review flagged follow-ups (non-blocking, candidates for v1.3.1):**
-- Add sample crontab line to README's classifier section (currently only mentions `npm run classify`)
-- Add warn-log in `scripts/vault-indexer.ts:111` when `frontmatter.bins` references an unresolved bin (currently silent typo footgun — note becomes orphaned with `classifier_skip = 1`)
+**v1.3.1 follow-ups / polish candidates:**
 - Dedupe `titleCase` (defined in both `lib/classify/decide.ts` and `app/api/classify/proposals/[id]/route.ts`)
 - `components/settings/ClassifierSettings.tsx` uses spec-literal Tailwind classes (`bg-black/40 border-white/20`); rest of settings page uses `bg-raised border-border-default`. Visual mismatch.
 - `/api/classify/run` blocks request thread for the full batch (~2 min for 100-note backlog at 3-concurrency × ~3-4s/call). Toast only renders after completion. Streaming progress is a v1.4 candidate.
-
-**v1.3 highest-risk smoke steps (per final review):**
-1. Step 11 — concurrent-run guard (two-process race; verify clean 409 toast vs hang)
-2. Step 8 — auto-create titleCase: `q3-okrs` → `"Q3 Okrs"` (cosmetic, not `"Q3 OKRs"`)
-3. Step 10 — frontmatter typo footgun (typo'd bin name still flips skip flag)
-4. Step 9 — undo of bin shared with another note (bin should NOT delete if other notes assigned)
+- Bin UX is still thin: user specifically noticed it is hard to inspect what is inside bins and to add sub-bins from the dashboard. This matters because the product goal is Obsidian parity plus AI-assisted routing.
+- Frontmatter typo behavior is safer now because unresolved bins warn during indexing, but typo'd `bins:` entries still set `classifier_skip = 1`; a UI/reporting surface for these warnings would help.
 
 **What shipped in v1.2:**
 - Full UI redesign — chat-primary layout, persistent bin tree sidebar, dark gray +
@@ -104,7 +98,7 @@ auto-classify — idea-level extraction. Outside every spec written so far.
 
 **v1.2.2 — Cleanup release** ✅ shipped on `feature/v1.2.2-cleanup` branch (pending manual smoke + merge). All 21 plan tasks complete. Spec + plan in `docs/superpowers/{specs,plans}/2026-04-26-v122-cleanup-design.md` and `docs/superpowers/plans/2026-04-26-v122-cleanup.md`.
 
-**v1.3 — Whole-note auto-classify** (scoped in original spec §9, ~2 weeks)
+**v1.3 — Whole-note auto-classify** ✅ shipped via PR #2
 - `scripts/agent-classify.ts` reads uncategorized notes, asks LLM to pick a bin
   from the existing hierarchy, assigns via `assignNoteToBin`
 - Runs after sync + on cron
@@ -156,8 +150,9 @@ concrete paths forward, and recommend one.
 
 - **Port 3001** for dev server. Port 3000 is always taken by the user's bun process
   (a different project on the same Mac). Always start with `PORT=3001`.
-- **Vault path:** `VAULT_PATH=$HOME/Vault npm run dev` — env var required for
-  sync scripts and chat retrieval.
+- **Vault path:** defaults to `$HOME/Library/Mobile Documents/com~apple~CloudDocs/icloud-shared/Obsidian/Obsidian Vault`.
+  Keep `VAULT_PATH` set to that path in `.env.local`, launchd, and cron when
+  running scripts so dashboard writes sync across the user's Apple devices.
 - **Notion token:** `.env.local` has `NOTION_TOKEN=ntn_...` (gitignored).
   Value may have been rotated — if sync fails with 401, user rotated; grab new
   token from https://www.notion.so/profile/integrations.
@@ -180,15 +175,16 @@ concrete paths forward, and recommend one.
 
 3. **Page-based Notion sync, not database-based.** Pivoted mid-Phase-2 when user
    said they don't use Notion databases. `sync-notion.ts` iterates page IDs from
-   `app_settings.notion.sync_targets` and outputs flat `~/Vault/notion-sync/<slug>.md`.
+   `app_settings.notion.sync_targets` and outputs flat `notion-sync/<slug>.md`
+   inside the canonical iCloud-backed vault.
 
 4. **No chokidar daemon.** Cron-driven vault indexer every 5 min. Capture triggers
    an immediate one-shot index pass. Avoided launchd lifecycle + FSEvents edge
    cases. Trade-off: up to 5 min lag for Obsidian edits to propagate.
 
-5. **iCloud for vault sync across devices.** Not Obsidian Sync. User already pays
-   for 200GB iCloud (solves phone storage + vault in one subscription). If sync
-   lag becomes annoying, upgrade to Obsidian Sync ($4/mo) — trivial migration.
+5. **iCloud for vault sync across devices.** Not Obsidian Sync. The canonical
+   vault now lives in iCloud Drive so the MacBook, iPhone, and future Mac Mini
+   host all point at the same Obsidian files.
 
 6. **No emojis in UI.** User was specific: "white retro-futuristic" line icons.
    Emoji icons were replaced with custom SVG components in `components/icons.tsx`.
@@ -212,37 +208,19 @@ concrete paths forward, and recommend one.
 
 ## What to do next session
 
-**Immediate priority: smoke v1.3.** Work in the worktree at `/Users/carterrognes/Work/Claude/Projects/Dashboard-v1.3` (branch `feature/v1.3-auto-classify`). The 12-step manual smoke walkthrough is in that branch's `README.md` under `### Manual smoke walkthrough`.
+**Start from main.** Use `/Users/carterrognes/Work/Claude/Projects/Dashboard`, pull `main`, and run the normal gates before new work. The v1.3 worktree can be removed after confirming nothing local is needed from it.
 
-**Smoke setup (one-time, in worktree):**
-```bash
-cd /Users/carterrognes/Work/Claude/Projects/Dashboard-v1.3
-# Snapshot main DB (WAL-aware) so worktree has bins/profiles/settings:
-sqlite3 /Users/carterrognes/Work/Claude/Projects/Dashboard/data/dashboard.db ".backup data/dashboard.db"
-cp /Users/carterrognes/Work/Claude/Projects/Dashboard/.env.local .env.local
-VAULT_PATH=$HOME/Vault PORT=3001 npm run dev   # starts on :3001
-# In another shell, confirm migration applied:
-sqlite3 data/dashboard.db "PRAGMA user_version;"  # should print 1
-```
-
-After dev server is up, open http://localhost:3001/settings → confirm "Classifier" section appears. Then http://localhost:3001/review → "Run classifier now" button + the 12-step walkthrough.
-
-**After smoke passes:**
-1. Patch any smoke findings on the branch
-2. Address final-review follow-ups in the "v1.3 final-review flagged follow-ups" list above (cron sample, frontmatter warn-log, dedupe titleCase, settings palette)
-3. `gh pr create` from worktree (or use https://github.com/Rognes82/Dashboard/pull/new/feature/v1.3-auto-classify)
-4. Merge to main, delete worktree (`git worktree remove ../Dashboard-v1.3`)
-5. Update this CLAUDE.md "Current state" section to reflect v1.3 shipped on main
-
-**After v1.3 merges, next decision:**
+**Next decision:**
+- **v1.3.1 bin UX + polish** — make it easier to inspect bin contents, add sub-bins, clean up settings styling, dedupe `titleCase`, and surface unresolved frontmatter-bin warnings.
 - **v1.4 segment extraction** — needs new brainstorm cycle. User's vision: split a Notion doc's 10 atomic ideas into 10 routed bins. v1.3 was prerequisite infrastructure.
-- **Phase 4 deploy** — Mac Mini launchd plist + cron entries (vault-indexer + sync + classifier), backups, iCloud verification. Cron entry for classifier needs to be added to README before deploy.
-- **v1.3.1 polish** — the final-review follow-ups consolidated into one cleanup release.
+- **Phase 4 deploy** — Mac Mini launchd plist + cron entries (vault-indexer + sync + classifier), backups, and iCloud vault verification.
 
 Pattern to follow: brainstorm → spec → Kimi audit → plan → Kimi audit → execute (subagent-driven, Opus on Max 20x).
 
-**When picking up, verify in the worktree:**
-- `git branch --show-current` — `feature/v1.3-auto-classify`
-- `git log --oneline | head -3` — top should be `92281db docs(v1.3): classifier README section`
-- `npm test` — 298 passing
-- `npm run lint` / `npx tsc --noEmit` / `npm run build` — clean (build has ~10 pre-existing prerender errors on API routes due to no DB at static-export time; tolerated, not a regression)
+**When picking up, verify:**
+- `git branch --show-current` — should be `main`
+- `git pull --ff-only`
+- `npm test` — should show 301 passing
+- `npm run lint` / `npx tsc --noEmit` / `npm run build` — clean
+- Dev server — if cold, start with `PORT=3001 npm run dev`; `.env.local` should provide the iCloud `VAULT_PATH`.
+- Dashboard at http://localhost:3001 — Settings should show vault status and Review should show the classifier controls.

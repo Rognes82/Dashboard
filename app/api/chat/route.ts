@@ -1,4 +1,3 @@
-import path from "path";
 import { NextResponse } from "next/server";
 import { getActiveProfile } from "@/lib/llm/profiles";
 import { streamChatForProfile } from "@/lib/llm/chat";
@@ -7,9 +6,10 @@ import { buildSystemPrompt, buildUserMessage } from "@/lib/llm/prompt";
 import { getBinById } from "@/lib/queries/bins";
 import { hasMachineKey } from "@/lib/llm/encryption";
 import { badRequest, isNonEmptyString, readJson } from "@/lib/validation";
+import { getVaultPath } from "@/lib/vault/path";
 
 export const dynamic = "force-dynamic";
-const VAULT_PATH = process.env.VAULT_PATH ?? path.join(process.env.HOME ?? "", "Vault");
+const VAULT_PATH = getVaultPath();
 
 interface ChatRequest {
   messages: { role: "user" | "assistant"; content: string }[];
